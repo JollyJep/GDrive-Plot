@@ -102,7 +102,12 @@ def plot_hub(plot_queue, service, folder_id2,
     ax.tick_params(labelbottom=True, labeltop=False, labelleft=True, labelright=False, direction='in')
     for label in (ax.get_xticklabels() + ax.get_yticklabels()):
         label.set_fontsize(16)
-    while keep_going:  # Will repeat until keyboard interupt, will gracefully exit
+    while keep_going:  # Will repeat until keyboard interrupt, will gracefully exit (Now redundant)
+        output_intergration = []
+        output_efficiency = []
+        output_radioiso = []
+        output_peak = []
+        output_fwhm = []
         id, name = plot_queue.get()  # Retrieve data from Google Drive Thread
         if name[-4:] == ".TKA":  # Prevents wrong files being plotted
             lock.acquire()  # Only one thread can do API requests
@@ -116,15 +121,14 @@ def plot_hub(plot_queue, service, folder_id2,
             fh.seek(0)
             lock.release()  # No longer using Google API, allow other threads to use it
             with open(os.path.join('./tmp/local_data.csv'),
-                      "wb") as f:  # Save the .tpk file in an easier to work with format (locally)
+                      "wb") as f:  # Save the .TKA file in an easier to work with format (locally)
                 f.write(fh.read())
                 f.close()
             master_data = pd.read_csv('./tmp/local_data.csv')  # Create internal spreadsheet of data
             y = master_data.dropna().reset_index(drop=True)
             y = y.values.ravel()
-            # print(y)
             times = y[:2]
-            n = 50  # the larger n is, the smoother curve will be
+            n = 15  # the larger n is, the smoother curve will be
             b = [1.0 / n] * n
             a = 1
             y = y[2:]
@@ -132,6 +136,7 @@ def plot_hub(plot_queue, service, folder_id2,
             for value, _ in enumerate(y):
                 x.append(value + 1)
             x = np.array(x)
+            x_store = x
             x = mca_to_kev(x)
             ax.plot(x, y, '--', marker='+')
             peaks,_ = scipy.signal.find_peaks(y, height=5)
@@ -142,7 +147,7 @@ def plot_hub(plot_queue, service, folder_id2,
                 repeat = True
                 fail = False
                 index = 0
-                p0 = (1, x[peak], 8)
+                p0 = (1, x_store[peak], 8)
                 old_cv = False
                 old_params = False
                 if peak == 0 or peak == len(y):
@@ -160,18 +165,16 @@ def plot_hub(plot_queue, service, folder_id2,
                         repeat = False
                         break
                     mean_l = np.mean(y[peak - index - 3: peak-index + 1])
-                    #print(mean_l)
                     mean_r = np.mean(y[peak + index: peak + index + 4])
-                    #print(mean_r)
                     if mean_l > np.mean(y[peak - index - 6: peak-index -2]):
                         higher +=3
                     if mean_r > np.mean(y[peak + index + 3: peak + index + 7]):
                         lower += 3
                     if mean_l <= np.mean(y[peak - index - 6: peak-index -2]) or mean_r <= np.mean(y[peak + index + 3: peak + index + 7]):
                         repeat = False
-                    x_gauss = x[peak - lower:peak + higher]
+                    x_gauss = x_store[peak - lower:peak + higher]
                     y_gauss = y[peak - lower:peak + higher]
-                    if len(y_gauss) >= 6:
+                    if len(y_gauss) > 6:
                         try:
                             params, cv = scipy.optimize.curve_fit(gauss, x_gauss, y_gauss, p0, maxfev=100000)
                             a, mean, sigma = params
@@ -180,6 +183,7 @@ def plot_hub(plot_queue, service, folder_id2,
                             rSquared = 1 - np.sum(squaredDiffs) / np.sum(squaredDiffsFromMean)
                             if rSquared > 0.9:
                                 old_x = x_gauss
+                                old_y = y_gauss
                                 old_params = params
                                 old_cv = cv
                             else:
@@ -191,18 +195,47 @@ def plot_hub(plot_queue, service, folder_id2,
                             fail = True
                             break
                 if not fail and not isinstance(old_cv, bool) and not isinstance(old_params, bool):
-                    ax.vlines(old_params[1], ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour, label=str(sigfig.round(old_params[1], np.sqrt(np.diag(old_cv))[1])))
-                    N_peak = gauss_integrate(old_x, old_params)
-                    radioactivity(N_peak, times, old_params[1], np.sqrt(np.diag(old_cv))[1])
+                    x_con = mca_to_kev(old_params[1])
+                    x_conu = x_con * np.sqrt(np.diag(old_cv))[1] / old_params[1]
+                    x_coni = mca_to_kev(old_x)
+                    x_consig = mca_to_kev(old_params[2])
+                    x_consigu = x_consig * np.sqrt(np.diag(old_cv))[2] / old_params[2]
+                    params_con = [old_params[0], x_con, x_consig]
+                    errors_con = [np.sqrt(np.diag(old_cv))[0], x_conu, x_consigu]
+                    ax.vlines(x_con, ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour, label="(" + str(sigfig.round(x_con,  x_conu)) + ") KeV")
+                    N_peak = gauss_integrate(x_coni, params_con, np.mean([old_y[0], old_y[-1]]), errors_con)
+                    output_intergration.append(N_peak)
+                    efficiency = efficiency_curve(x_con)
+                    output_peak.append([x_con, x_conu])
+                    output_efficiency.append(efficiency)
+                    output_fwhm.append([x_consig * 2 * np.sqrt(2 * np.log(2)), x_consigu * 2 * np.sqrt(2 * np.log(2))])
+                    radioiso = isotope_detector(x_con, x_conu)
+                    output_radioiso.append(radioiso)
                     #plt.text(old_params[1], max(y) * 0.9,
                              #"" + str(sigfig.round(old_params[1], np.sqrt(np.diag(cv))[1])) + "", color=colour,
                              #rotation=90)
                 col += change
-                #print(col)
                 colour = colorsys.hsv_to_rgb(float(col[0]) / 65536, 1, 1)
-                #print(colour)
 
 
+            output = [name]
+            for value, item in enumerate(output_peak):
+                output.append("Peak Energy:")
+                output.append("(" + str(sigfig.round(output_peak[value][0],  output_peak[value][1])) + ") KeV")
+                output.append("FWHM:")
+                output.append("(" + str(sigfig.round(output_fwhm[value][0],  output_fwhm[value][1])) + ") KeV")
+                output.append("Area of photopeak:")
+                output.append(str(sigfig.round(output_intergration[value][0],  output_intergration[value][1])))
+                output.append("Efficiency")
+                output.append(str(output_efficiency[value]))
+                output.append("Potential radioisotopes:")
+                for isotope in output_radioiso[value]:
+                    output.append(isotope)
+                output.append("-----------------------------------------------------------------------------------------\n")
+            with open(r'./tmp/' + name + "_plotting_variables.txt" , 'w') as fp:
+                for item in output:
+                    # write each item on a new line
+                    fp.write("%s\n" % item)
 
             plt.ylabel(r"Counts", fontsize=20)
             plt.xlabel("Energy/KeV", fontsize=20)
@@ -215,9 +248,9 @@ def plot_hub(plot_queue, service, folder_id2,
             ax.clear()
             excelname = './tmp/' + name + '.xlsx'  # Creating output excel data file name
             master_data.to_excel(excelname)  # Save excel
-            filenames = [name + ".xlsx", name + ".png"]
+            filenames = [name + ".xlsx", name + ".png", name + "_plotting_variables.txt"]
             mime_types = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                          'image/png']  # Define filetypes for Google Drive API
+                          'image/png', 'text/plain']  # Define filetypes for Google Drive API
             #lock.acquire()  # Protect Google API against simultaneous usage
             #for file, mime in zip(filenames, mime_types):  # Upload data to Google Drive in output folder
             #    file_metadata = {
@@ -248,17 +281,18 @@ def efficiency_curve(x):
     return (2 * 8.66 / 100) / ((x / 103) ** 1.1 + (103 / x) ** 3.6)
 
 
-def gauss_integrate(x, params):
+def gauss_integrate(x, params, height, errors):
     local_x = sympy.symbols('x')
     a, mean, sigma = params
     local_gauss = a * sympy.exp(-(local_x - mean) ** 2 / (2 * sigma ** 2))
-    return sympy.integrate(local_gauss, (local_x, -oo, oo))
+    area = float(sympy.integrate(local_gauss, (local_x, min(x), max(x)))) #- height * (max(x) - min(x))
+    return (area, area * np.sqrt((errors[0] / a) ** 2 + (errors[1] / mean) ** 2 + (errors[2] / sigma) ** 2))
 
 
-def radioactivity(N_peak, times, energy, uncertainty):
-    efficiency = efficiency_curve(energy)
-    isotope_detector(energy, uncertainty)
-    return
+#def radioactivity(N_peak, times, energy, uncertainty):
+#    efficiency = efficiency_curve(energy)
+#    #isotope_detector(energy, uncertainty)
+#    return
 
 
 def isotope_detector(energy, uncertainty):
@@ -266,6 +300,7 @@ def isotope_detector(energy, uncertainty):
     global sheets
     old_energy_levels = []
     old_intensities = []
+    output = []
     nearest = True
     for sheet in sheets:
         df = pd.read_excel(master_data, sheet)
@@ -297,19 +332,20 @@ def isotope_detector(energy, uncertainty):
             old_energy_levels = energy_levels + [sheet]
             old_intensities = intensities
             dfo = df
-        if np.isclose(df['Energy (keV)'][energy_levels[0]], energy, atol=uncertainty*3) or np.isclose(df['Energy (keV)'][energy_levels[1]], energy, atol=uncertainty):
+        if np.isclose(df['Energy (keV)'][energy_levels[0]], energy, rtol=0.01) or np.isclose(df['Energy (keV)'][energy_levels[1]], energy, rtol=0.01):
             nearest = False
             if len(old_energy_levels) == 0:
                 old_energy_levels = energy_levels + [sheet]
+                output.append(sheet.strip('.l'))
                 old_intensities = intensities
                 dfo = df
             else:
                 if max(intensities) > max(old_intensities):
                     old_energy_levels = energy_levels + [sheet]
+                    output.append(sheet.strip('.l'))
                     old_intensities = intensities
                     dfo = df
-    print(dfo['Energy (keV)'][old_energy_levels[:2]])
-    print(old_intensities, old_energy_levels[2:])
+    return output
 
 
 
