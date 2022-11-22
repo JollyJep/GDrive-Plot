@@ -144,36 +144,48 @@ def plot_hub(plot_queue, service, folder_id2,
             col = np.array([0, 65536, 65536], dtype=np.uint16)
             change = np.array([65536 / len(peaks), 0, 0], dtype=np.uint8)
             for peak in peaks:
+
+                lower = 0
+                higher = 0
                 repeat = True
                 fail = False
                 index = 0
                 p0 = (1, x_store[peak], 8)
                 old_cv = False
                 old_params = False
+                old_mean_l = 0.0
+                old_mean_r = 0.0
                 if peak == 0 or peak == len(y):
                     repeat = False
                     fail = True
                 else:
-                    if y[peak] >= y[peak-1] and y[peak] >= y[peak +1] and y[peak] > y[peak-2] and y[peak] > y[peak + 2]:
-                        higher = 3
+                    if y[peak] >= y[peak - 1] and y[peak] >= y[peak +1] and y[peak] > y[peak-2] and y[peak] > y[peak + 2]:
+                        higher = 2
                         lower = 2
+                        old_mean_l = np.mean([y[peak], y[peak - 1], y[peak - 2]])
+                        old_mean_r = np.mean([y[peak], y[peak + 1], y[peak + 2]])
                     else:
                         repeat = False
                         fail = True
                 while repeat:
-                    if len(y[peak - index - 3: peak-index + 1]) < 3 or len(y[peak + index: peak + index + 4]) < 3 or len(y[peak - index - 6: peak-index -2]) < 3 or len(y[peak + index + 3: peak + index + 7]) < 3:
+                    if len(y[peak - index - 3: peak-index]) < 3 or len(y[peak + index: peak + index + 3]) < 3 or len(y[peak - index - 6: peak-index -3]) < 3 or len(y[peak + index + 3: peak + index + 6]) < 3:
                         repeat = False
                         break
-                    mean_l = np.mean(y[peak - index - 3: peak-index + 1])
-                    mean_r = np.mean(y[peak + index: peak + index + 4])
-                    if mean_l > np.mean(y[peak - index - 6: peak-index -2]):
-                        higher +=3
-                    if mean_r > np.mean(y[peak + index + 3: peak + index + 7]):
-                        lower += 3
-                    if mean_l <= np.mean(y[peak - index - 6: peak-index -2]) or mean_r <= np.mean(y[peak + index + 3: peak + index + 7]):
+                    mean_l = np.mean(y[peak - lower - 3: peak-lower])
+                    mean_r = np.mean(y[peak + higher: peak + higher + 3])
+                    if mean_l >= old_mean_l or mean_r >= old_mean_r:
                         repeat = False
+                    if mean_l < old_mean_l:
+                        lower +=3
+                        old_mean_l = mean_l
+                    if mean_r < old_mean_r:
+                        lower += 3
+                        old_mean_r = mean_r
+                        #print(lower)
+
                     x_gauss = x_store[peak - lower:peak + higher]
                     y_gauss = y[peak - lower:peak + higher]
+                    #print(len(y_gauss))
                     if len(y_gauss) > 6:
                         try:
                             params, cv = scipy.optimize.curve_fit(gauss, x_gauss, y_gauss, p0, maxfev=100000)
@@ -182,6 +194,7 @@ def plot_hub(plot_queue, service, folder_id2,
                             squaredDiffsFromMean = np.square(y_gauss - np.mean(y_gauss))
                             rSquared = 1 - np.sum(squaredDiffs) / np.sum(squaredDiffsFromMean)
                             if rSquared > 0.9:
+                                #print(peak)
                                 old_x = x_gauss
                                 old_y = y_gauss
                                 old_params = params
@@ -197,6 +210,8 @@ def plot_hub(plot_queue, service, folder_id2,
                 if not fail and not isinstance(old_cv, bool) and not isinstance(old_params, bool):
                     x_con = mca_to_kev(old_params[1])
                     x_conu = x_con * np.sqrt(np.diag(old_cv))[1] / old_params[1]
+                    #print(str(old_x))
+                    #print(old_params[1])
                     x_coni = mca_to_kev(old_x)
                     x_consig = mca_to_kev(old_params[2])
                     x_consigu = x_consig * np.sqrt(np.diag(old_cv))[2] / old_params[2]
@@ -282,10 +297,13 @@ def efficiency_curve(x):
 
 
 def gauss_integrate(x, params, height, errors):
+    #print(max(x) - min(x))
+    #print(height)
     local_x = sympy.symbols('x')
     a, mean, sigma = params
     local_gauss = a * sympy.exp(-(local_x - mean) ** 2 / (2 * sigma ** 2))
-    area = float(sympy.integrate(local_gauss, (local_x, min(x), max(x)))) #- height * (max(x) - min(x))
+    area = float(sympy.integrate(local_gauss, (local_x, min(x), max(x))))
+    #print(area)
     return (area, area * np.sqrt((errors[0] / a) ** 2 + (errors[1] / mean) ** 2 + (errors[2] / sigma) ** 2))
 
 
