@@ -17,6 +17,7 @@ from scipy.signal import lfilter
 from numpy import ma
 from openpyxl import load_workbook
 
+
 CLIENT_SECRET_FILE = 'credentials.json'  # file storing API secret and OAuth2 data
 API_NAME = 'drive'
 API_VERSION = 'v3'
@@ -186,14 +187,17 @@ def plot_hub(plot_queue, service, folder_id2,
                     x_gauss = x_store[peak - lower:peak + higher]
                     y_gauss = y[peak - lower:peak + higher]
                     #print(len(y_gauss))
-                    if len(y_gauss) > 6:
+                    if len(y_gauss) > 8:
+                        print(len(y_gauss))
                         try:
                             params, cv = scipy.optimize.curve_fit(gauss, x_gauss, y_gauss, p0, maxfev=100000)
                             a, mean, sigma = params
+                            if mean == 0:
+                                continue
                             squaredDiffs = np.square(y_gauss - gauss(x_gauss, a, mean, sigma))
                             squaredDiffsFromMean = np.square(y_gauss - np.mean(y_gauss))
                             rSquared = 1 - np.sum(squaredDiffs) / np.sum(squaredDiffsFromMean)
-                            if rSquared > 0.9:
+                            if rSquared > 0.95:
                                 #print(peak)
                                 old_x = x_gauss
                                 old_y = y_gauss
@@ -211,9 +215,8 @@ def plot_hub(plot_queue, service, folder_id2,
                     x_con = mca_to_kev(old_params[1])
                     x_conu = x_con * np.sqrt(np.diag(old_cv))[1] / old_params[1]
                     #print(str(old_x))
-                    #print(old_params[1])
                     x_coni = mca_to_kev(old_x)
-                    x_consig = mca_to_kev(old_params[2])
+                    x_consig = mca_to_kev(abs(old_params[2]))
                     x_consigu = x_consig * np.sqrt(np.diag(old_cv))[2] / old_params[2]
                     params_con = [old_params[0], x_con, x_consig]
                     errors_con = [np.sqrt(np.diag(old_cv))[0], x_conu, x_consigu]
@@ -240,7 +243,10 @@ def plot_hub(plot_queue, service, folder_id2,
                 output.append("FWHM:")
                 output.append("(" + str(sigfig.round(output_fwhm[value][0],  output_fwhm[value][1])) + ") KeV")
                 output.append("Area of photopeak:")
-                output.append(str(sigfig.round(output_intergration[value][0],  output_intergration[value][1])))
+                try:
+                    output.append(str(sigfig.round(output_intergration[value][0],  output_intergration[value][1])))
+                except:
+                    output.append("Error")
                 output.append("Efficiency")
                 output.append(str(output_efficiency[value]))
                 output.append("Potential radioisotopes:")
@@ -266,22 +272,22 @@ def plot_hub(plot_queue, service, folder_id2,
             filenames = [name + ".xlsx", name + ".png", name + "_plotting_variables.txt"]
             mime_types = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                           'image/png', 'text/plain']  # Define filetypes for Google Drive API
-            #lock.acquire()  # Protect Google API against simultaneous usage
-            #for file, mime in zip(filenames, mime_types):  # Upload data to Google Drive in output folder
-            #    file_metadata = {
-            #        'name': file,
-            #        'parents': [folder_id2]
-            #    }
-            #    media = MediaFileUpload('./tmp/{0}'.format(file), mimetype=mime)
-            #    service.files().create(
-            #        body=file_metadata,
-            #        media_body=media,
-            #        fields='id'
-            #    ).execute()
+            lock.acquire()  # Protect Google API against simultaneous usage
+            for file, mime in zip(filenames, mime_types):  # Upload data to Google Drive in output folder
+                file_metadata = {
+                    'name': file,
+                    'parents': [folder_id2]
+                }
+                media = MediaFileUpload('./tmp/{0}'.format(file), mimetype=mime)
+                service.files().create(
+                    body=file_metadata,
+                    media_body=media,
+                    fields='id'
+                ).execute()
             now = datetime.now()
             finish_time = now.strftime("%A, %d, %m, %Y\n%H:%M:%S")
             print(name + " complete" + "\n" + finish_time + "\n")
-            #lock.release()  # Allow other threads to access the API
+            lock.release()  # Allow other threads to access the API
 
 
 def gauss(x, a, mean, sigma):
@@ -302,8 +308,8 @@ def gauss_integrate(x, params, height, errors):
     local_x = sympy.symbols('x')
     a, mean, sigma = params
     local_gauss = a * sympy.exp(-(local_x - mean) ** 2 / (2 * sigma ** 2))
-    area = float(sympy.integrate(local_gauss, (local_x, min(x), max(x))))
-    #print(area)
+    area = sympy.integrate(local_gauss, (local_x, min(x), max(x))) #- height * (max(x) - min(x))
+    print(area)
     return (area, area * np.sqrt((errors[0] / a) ** 2 + (errors[1] / mean) ** 2 + (errors[2] / sigma) ** 2))
 
 
