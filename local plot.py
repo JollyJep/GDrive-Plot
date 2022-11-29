@@ -97,7 +97,7 @@ def plot_hub(plot_queue, service, folder_id2,
     plt.tick_params(labelbottom=True, labeltop=False, labelleft=True, labelright=False, direction='in')
     plt.rcParams['text.usetex'] = True
     plt.rcParams['font.size'] = '16'
-    fig = plt.figure(figsize=(16, 9))
+    fig = plt.figure(figsize=(21, 9))
     ax = fig.add_subplot()
     ax.tick_params(bottom=True, top=True, left=True, right=True, direction='in')
     ax.tick_params(labelbottom=True, labeltop=False, labelleft=True, labelright=False, direction='in')
@@ -151,7 +151,7 @@ def plot_hub(plot_queue, service, folder_id2,
                 repeat = True
                 fail = False
                 index = 0
-                p0 = (1, x_store[peak], 8)
+                p0 = (1, x_store[peak], 8, y[peak]/2)
                 old_cv = False
                 old_params = False
                 old_mean_l = 0.0
@@ -187,14 +187,14 @@ def plot_hub(plot_queue, service, folder_id2,
                     x_gauss = x_store[peak - lower:peak + higher]
                     y_gauss = y[peak - lower:peak + higher]
                     #print(len(y_gauss))
-                    if len(y_gauss) > 8:
-                        print(len(y_gauss))
+                    if len(y_gauss) > 10:
+                        #print(len(y_gauss))
                         try:
                             params, cv = scipy.optimize.curve_fit(gauss, x_gauss, y_gauss, p0, maxfev=100000)
-                            a, mean, sigma = params
+                            a, mean, sigma, b = params
                             if mean == 0:
                                 continue
-                            squaredDiffs = np.square(y_gauss - gauss(x_gauss, a, mean, sigma))
+                            squaredDiffs = np.square(y_gauss - gauss(x_gauss, a, mean, sigma, b))
                             squaredDiffsFromMean = np.square(y_gauss - np.mean(y_gauss))
                             rSquared = 1 - np.sum(squaredDiffs) / np.sum(squaredDiffsFromMean)
                             if rSquared > 0.95:
@@ -261,10 +261,9 @@ def plot_hub(plot_queue, service, folder_id2,
             plt.ylabel(r"Counts", fontsize=20)
             plt.xlabel("Energy/KeV", fontsize=20)
             plotname = './tmp/' + name + '.png'  # Creating output plot file name
-            plt.legend()
+            plt.legend(fontsize=8)
             ax.set_yscale("log")
             #plt.show()
-            #exit()
             plt.savefig(plotname, dpi=300)  # Save plot
             ax.clear()
             excelname = './tmp/' + name + '.xlsx'  # Creating output excel data file name
@@ -290,8 +289,8 @@ def plot_hub(plot_queue, service, folder_id2,
             lock.release()  # Allow other threads to access the API
 
 
-def gauss(x, a, mean, sigma):
-    return a * np.exp(-(x - mean) ** 2 / (2 * sigma ** 2))
+def gauss(x, a, mean, sigma, b):
+    return b + a * np.exp(-(x - mean) ** 2 / (2 * sigma ** 2))
 
 
 def mca_to_kev(x):
