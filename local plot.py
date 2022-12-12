@@ -8,6 +8,7 @@ import threading as th
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy
+from scipy.special import erf
 from datetime import datetime
 import colorsys
 import sigfig
@@ -16,6 +17,8 @@ from sympy import oo
 from scipy.signal import lfilter
 from numpy import ma
 from openpyxl import load_workbook
+from colorama import Fore
+from pyampd.ampd import find_peaks, find_peaks_adaptive
 
 
 CLIENT_SECRET_FILE = 'credentials.json'  # file storing API secret and OAuth2 data
@@ -64,9 +67,11 @@ def g_drive_daemon(plot_queue, service, folder_id,
             lock.acquire()  # Semaphore used to only allow one thread to send API requests at once
             response = service.files().list(q=query).execute()  # Send query to API (What files in import folder?)
             files = response.get('files')  # Data from request
+            #print(response)
             nextPageToken = response.get('nextPageToken')
             while nextPageToken:  # Used if more than a page of files
                 response = service.files().list(q=query, pageToken=nextPageToken).execute()
+                #print(response)
                 files.extend(response.get('files'))
                 nextPageToken = response.get('nextPageToken')
             lock.release()
@@ -75,14 +80,21 @@ def g_drive_daemon(plot_queue, service, folder_id,
                 files)  # Stores file metadata in a Pandas Dataframe for analysis (Basically Python Spreadsheet)
             if not df.equals(store_df):  # Detects if there are new files
                 for index, row in df.iterrows():
-                    if row.values[1] not in store_df.values:
+                    if row.values[1] not in store_df.values and row.values[1] != "application/octet-stream":
                         plot_queue.put((str(row.values[1]), str(row.values[
                                                                     2])))  # 2nd level check to check individual files, if files are different, then the file ID and name are sent for processing with the Plot Thread
+                    elif row.values[2] not in store_df.values and row.values != "application/octet-stream":
+                        plot_queue.put((str(row.values[2]), str(row.values[
+                                                                    3])))
+
 
                 with open(os.path.join('./tmp/Archive.txt'),
                           "w") as f:  # Save already requested plots to prevent duplicate plots at a crash
                     for index, row in df.iterrows():
-                        f.write(row.values[1] + '\n')  # Only ID is needed to detect new files
+                        if row.values[1] != "application/octet-stream":
+                            f.write(row.values[1] + '\n')  # Only ID is needed to detect new files
+                        elif row.values[2] != "application/octet-stream":
+                            f.write(row.values[2] + '\n')
                     f.close()
             store_df = df
             request_time = 0.5  # Predict that the API now works again and can take requests at the usual rate
@@ -140,31 +152,37 @@ def plot_hub(plot_queue, service, folder_id2,
             x_store = x
             x = mca_to_kev(x)
             ax.plot(x, y, '--', marker='+')
-            peaks,_ = scipy.signal.find_peaks(y, height=5)
+            p0 = (1,1,1)
+            peaks, _ = scipy.signal.find_peaks(y, height=100)
             colour = (1, 0, 0)
             col = np.array([0, 65536, 65536], dtype=np.uint16)
             change = np.array([65536 / len(peaks), 0, 0], dtype=np.uint8)
+            print(len(peaks))
             for peak in peaks:
+                #ax.vlines(peak, ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour,
+                #          label=peak)
 
                 lower = 0
                 higher = 0
                 repeat = True
+                repeat_l = True
+                repeat_r = True
                 fail = False
                 index = 0
-                p0 = (1, x_store[peak], 8, y[peak]/2)
+                p0 = (1, x_store[peak], 2, 0.1, y[peak]/2)
                 old_cv = False
                 old_params = False
                 old_mean_l = 0.0
                 old_mean_r = 0.0
-                if peak == 0 or peak == len(y):
+                if peak == 0 or peak == len(y)-1:
                     repeat = False
                     fail = True
                 else:
-                    if y[peak] >= y[peak - 1] and y[peak] >= y[peak +1] and y[peak] > y[peak-2] and y[peak] > y[peak + 2]:
-                        higher = 2
-                        lower = 2
-                        old_mean_l = np.mean([y[peak], y[peak - 1], y[peak - 2]])
-                        old_mean_r = np.mean([y[peak], y[peak + 1], y[peak + 2]])
+                    if y[peak] >= y[peak - 1] and y[peak] >= y[peak +1] and y[peak] > y[peak-2] and y[peak] > y[peak + 2] and y[peak] >= y[peak - 3] and y[peak] >= y[peak + 3]:
+                        higher = 3
+                        lower = 3
+                        old_mean_l = np.mean([y[peak], y[peak - 1], y[peak - 2], y[peak - 3]])
+                        old_mean_r = np.mean([y[peak], y[peak + 1], y[peak + 2], y[peak + 3]])
                     else:
                         repeat = False
                         fail = True
@@ -172,63 +190,89 @@ def plot_hub(plot_queue, service, folder_id2,
                     if len(y[peak - index - 3: peak-index]) < 3 or len(y[peak + index: peak + index + 3]) < 3 or len(y[peak - index - 6: peak-index -3]) < 3 or len(y[peak + index + 3: peak + index + 6]) < 3:
                         repeat = False
                         break
+                    if not repeat_l and not repeat_r:
+                        repeat = False
+                        break
                     mean_l = np.mean(y[peak - lower - 3: peak-lower])
                     mean_r = np.mean(y[peak + higher: peak + higher + 3])
-                    if mean_l >= old_mean_l or mean_r >= old_mean_r:
-                        repeat = False
+                    if mean_l >= old_mean_l:
+                        repeat_l = False
+                    if mean_r >= old_mean_r:
+                        repeat_r = False
                     if mean_l < old_mean_l:
-                        lower +=3
+                        lower += 3
                         old_mean_l = mean_l
                     if mean_r < old_mean_r:
-                        lower += 3
+                        higher += 3
                         old_mean_r = mean_r
                         #print(lower)
-
+                    n = 3  # the larger n is, the smoother curve will be
+                    b = [1.0 / n] * n
+                    a = 1
                     x_gauss = x_store[peak - lower:peak + higher]
                     y_gauss = y[peak - lower:peak + higher]
                     #print(len(y_gauss))
-                    if len(y_gauss) > 10:
-                        #print(len(y_gauss))
-                        try:
-                            params, cv = scipy.optimize.curve_fit(gauss, x_gauss, y_gauss, p0, maxfev=100000)
-                            a, mean, sigma, b = params
-                            if mean == 0:
+                    if len(y_gauss) > 10 and lower > 8 and higher >8:
+
+
+                            print(len(y_gauss))
+                            print(len(x_gauss))
+                            params, cv = scipy.optimize.curve_fit(skewed_gauss, x_gauss, y_gauss, p0, maxfev=1000000)
+                            A, mu, sigma, gamma, b = params
+                            if mu == 0:
                                 continue
-                            squaredDiffs = np.square(y_gauss - gauss(x_gauss, a, mean, sigma, b))
+                            squaredDiffs = np.square(y_gauss - skewed_gauss(x_gauss, A, mu, sigma, gamma, b))
                             squaredDiffsFromMean = np.square(y_gauss - np.mean(y_gauss))
                             rSquared = 1 - np.sum(squaredDiffs) / np.sum(squaredDiffsFromMean)
-                            if rSquared > 0.95:
+                            #print(rSquared)
+                            print(params)
+                            if rSquared > 0.05:
+                                print(Fore.GREEN)
+                                print(higher)
+                                print(Fore.BLUE)
+                                print(lower)
                                 #print(peak)
                                 old_x = x_gauss
                                 old_y = y_gauss
                                 old_params = params
                                 old_cv = cv
+                            elif rSquared > 0.01:
+                                #print(len(y_gauss))
+                                continue
                             else:
                                 repeat = False
                                 break
-                        except:
-                            repeat = False
-                            print(old_params, old_cv)
-                            fail = True
-                            break
+                        #except:
+                        #    repeat = False
+                        #    #print(old_params, old_cv)
+                        #    fail = True
+                        #    break
                 if not fail and not isinstance(old_cv, bool) and not isinstance(old_params, bool):
                     x_con = mca_to_kev(old_params[1])
                     x_conu = x_con * np.sqrt(np.diag(old_cv))[1] / old_params[1]
                     #print(str(old_x))
                     x_coni = mca_to_kev(old_x)
-                    x_consig = mca_to_kev(abs(old_params[2]))
-                    x_consigu = x_consig * np.sqrt(np.diag(old_cv))[2] / old_params[2]
-                    params_con = [old_params[0], x_con, x_consig]
-                    errors_con = [np.sqrt(np.diag(old_cv))[0], x_conu, x_consigu]
-                    ax.vlines(x_con, ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour, label="(" + str(sigfig.round(x_con,  x_conu)) + ") KeV")
-                    N_peak = gauss_integrate(x_coni, params_con, np.mean([old_y[0], old_y[-1]]), errors_con)
-                    output_intergration.append(N_peak)
-                    efficiency = efficiency_curve(x_con)
-                    output_peak.append([x_con, x_conu])
-                    output_efficiency.append(efficiency)
-                    output_fwhm.append([x_consig * 2 * np.sqrt(2 * np.log(2)), x_consigu * 2 * np.sqrt(2 * np.log(2))])
-                    radioiso = isotope_detector(x_con, x_conu)
-                    output_radioiso.append(radioiso)
+                    x_consig1 = mca_to_kev(abs(old_params[2]))
+                    x_consigu1 = x_consig1 * np.sqrt(np.diag(old_cv))[2] / old_params[2]
+                    params_con = [old_params[0], x_con, x_consig1, old_params[3], old_params[4]]
+                    #print(params_con)
+                    #print(old_params)
+                    errors_con = [np.sqrt(np.diag(old_cv))[0], np.sqrt(np.diag(old_cv))[1], x_conu, x_consigu1]
+                    try:
+                        ax.vlines(x_con, ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour, label="(" + str(sigfig.round(x_con,  x_conu)) + ") KeV")
+                        x_new = np.linspace(min(old_x), max(old_x))
+                        func = skewed_gauss(x_new, params_con[0], params_con[1], params_con[2], params_con[3], params_con[4])
+                        plt.plot(x_new, func, color="k")
+                    except:
+                        print("I fail")
+                    #N_peak = gauss_integrate(x_coni, params_con, np.mean([old_y[0], old_y[-1]]), errors_con)
+                    #output_intergration.append(N_peak)
+                    #efficiency = efficiency_curve(x_con)
+                    #output_peak.append([x_con, x_conu])
+                    #output_efficiency.append(efficiency)
+                    #output_fwhm.append([x_consig * 2 * np.sqrt(2 * np.log(2)), x_consigu * 2 * np.sqrt(2 * np.log(2))])
+                    #radioiso = isotope_detector(x_con, x_conu)
+                    #output_radioiso.append(radioiso)
                     #plt.text(old_params[1], max(y) * 0.9,
                              #"" + str(sigfig.round(old_params[1], np.sqrt(np.diag(cv))[1])) + "", color=colour,
                              #rotation=90)
@@ -236,35 +280,37 @@ def plot_hub(plot_queue, service, folder_id2,
                 colour = colorsys.hsv_to_rgb(float(col[0]) / 65536, 1, 1)
 
 
-            output = [name]
-            for value, item in enumerate(output_peak):
-                output.append("Peak Energy:")
-                output.append("(" + str(sigfig.round(output_peak[value][0],  output_peak[value][1])) + ") KeV")
-                output.append("FWHM:")
-                output.append("(" + str(sigfig.round(output_fwhm[value][0],  output_fwhm[value][1])) + ") KeV")
-                output.append("Area of photopeak:")
-                try:
-                    output.append(str(sigfig.round(output_intergration[value][0],  output_intergration[value][1])))
-                except:
-                    output.append("Error")
-                output.append("Efficiency")
-                output.append(str(output_efficiency[value]))
-                output.append("Potential radioisotopes:")
-                for isotope in output_radioiso[value]:
-                    output.append(isotope)
-                output.append("-----------------------------------------------------------------------------------------\n")
-            with open(r'./tmp/' + name + "_plotting_variables.txt" , 'w') as fp:
-                for item in output:
-                    # write each item on a new line
-                    fp.write("%s\n" % item)
+            #output = [name]
+            #for value, item in enumerate(output_peak):
+            #    output.append("Peak Energy:")
+            #    output.append("(" + str(sigfig.round(output_peak[value][0],  output_peak[value][1])) + ") KeV")
+            #    output.append("FWHM:")
+            #    output.append("(" + str(sigfig.round(output_fwhm[value][0],  output_fwhm[value][1])) + ") KeV")
+            #    output.append("Area of photopeak:")
+            #    try:
+            #        output.append(str(sigfig.round(output_intergration[value][0],  output_intergration[value][1])))
+            #    except:
+            #        output.append("Error")
+            #    output.append("Efficiency")
+            #    output.append(str(output_efficiency[value]))
+            #    output.append("Potential radioisotopes:")
+            #    for isotope in output_radioiso[value]:
+            #        output.append(isotope)
+            #    output.append("-----------------------------------------------------------------------------------------\n")
+            #with open(r'./tmp/' + name + "_plotting_variables.txt" , 'w') as fp:
+            #    for item in output:
+            #        # write each item on a new line
+            #        fp.write("%s\n" % item)
 
             plt.ylabel(r"Counts", fontsize=20)
             plt.xlabel("Energy/KeV", fontsize=20)
             plotname = './tmp/' + name + '.png'  # Creating output plot file name
             plt.legend(fontsize=8)
             ax.set_yscale("log")
-            #plt.show()
-            plt.savefig(plotname, dpi=300)  # Save plot
+            plt.show()
+
+            #plt.savefig(plotname, dpi=300)
+            exit()  # Save plot
             ax.clear()
             excelname = './tmp/' + name + '.xlsx'  # Creating output excel data file name
             master_data.to_excel(excelname)  # Save excel
@@ -291,6 +337,36 @@ def plot_hub(plot_queue, service, folder_id2,
 
 def gauss(x, a, mean, sigma, b):
     return b + a * np.exp(-(x - mean) ** 2 / (2 * sigma ** 2))
+
+
+def background(x, b, n, c):
+    return b * x**n +c
+
+def split_gauss(x, A1, A2, mean, sigma1, sigma2, b1):
+    b2 = A1-A2 +b1
+    low_x = x[x < mean]
+    high_x = x[x >= mean]
+    low_gauss = b1 + A1 * np.exp(-(low_x - mean) ** 2 / (2 * sigma1 ** 2))
+    high_gauss = b2 + A2 * np.exp(-(high_x - mean) ** 2 / (2 * sigma2 ** 2))
+    return np.concatenate((low_gauss, high_gauss))
+
+
+def split_skewed_gauss(x, A1, A2, mu, sigma, b1, gamma):
+    denom = np.sqrt(np.pi) * sigma
+    low_x = x[x < mu]
+    high_x = x[x >= mu]
+    b2 = (A1 / denom - A2 / denom + b1) / high_x
+    low_gauss = b1 * low_x +A1/denom * np.exp((-(low_x-mu)**2)/(2 * sigma ** 2)) * (1 + erf((gamma * (low_x-mu))/(sigma * np.sqrt(2)
+    )))
+    high_gauss = b2 * high_x + A2 / denom * np.exp((-(high_x - mu) ** 2) / (2 * sigma ** 2)) * (1 + erf((gamma * (high_x - mu)) / (sigma * np.sqrt(2))))
+    #print(np.concatenate((low_gauss, high_gauss)))
+    return np.concatenate((low_gauss, high_gauss))
+
+
+def skewed_gauss(x, A, mu, sigma,  gamma, b):
+    denom = np.sqrt(np.pi) * sigma
+    return b + A / denom * np.exp((-(x - mu) ** 2) / (2 * sigma ** 2)) * (1 + erf((gamma * (x - mu)) / (sigma * np.sqrt(2))))
+
 
 
 def mca_to_kev(x):
