@@ -150,10 +150,9 @@ def plot_hub(plot_queue, service, folder_id2,
                 x.append(value + 1)
             x = np.array(x)
             x_store = x
-            x = mca_to_kev(x)
+            #x = mca_to_kev(x)
             ax.plot(x, y, '--', marker='+')
-            p0 = (1,1,1)
-            peaks, _ = scipy.signal.find_peaks(y, height=100)
+            peaks, _ = scipy.signal.find_peaks(y, height=100, prominence= 100)
             colour = (1, 0, 0)
             col = np.array([0, 65536, 65536], dtype=np.uint16)
             change = np.array([65536 / len(peaks), 0, 0], dtype=np.uint8)
@@ -174,97 +173,132 @@ def plot_hub(plot_queue, service, folder_id2,
                 old_params = False
                 old_mean_l = 0.0
                 old_mean_r = 0.0
-                if peak == 0 or peak == len(y)-1:
+                if peak == 0 or len(y) -5 < peak:
                     repeat = False
                     fail = True
                 else:
-                    if y[peak] >= y[peak - 1] and y[peak] >= y[peak +1] and y[peak] > y[peak-2] and y[peak] > y[peak + 2] and y[peak] >= y[peak - 3] and y[peak] >= y[peak + 3]:
-                        higher = 3
-                        lower = 3
-                        old_mean_l = np.mean([y[peak], y[peak - 1], y[peak - 2], y[peak - 3]])
-                        old_mean_r = np.mean([y[peak], y[peak + 1], y[peak + 2], y[peak + 3]])
+                    if y[peak] >= y[peak - 1] and y[peak] >= y[peak +1] and y[peak] > y[peak-2] and y[peak] > y[peak + 2] :
+                        higher = 2
+                        lower = 2
                     else:
                         repeat = False
                         fail = True
+                found = False
                 while repeat:
+
                     if len(y[peak - index - 3: peak-index]) < 3 or len(y[peak + index: peak + index + 3]) < 3 or len(y[peak - index - 6: peak-index -3]) < 3 or len(y[peak + index + 3: peak + index + 6]) < 3:
                         repeat = False
                         break
                     if not repeat_l and not repeat_r:
                         repeat = False
                         break
-                    mean_l = np.mean(y[peak - lower - 3: peak-lower])
-                    mean_r = np.mean(y[peak + higher: peak + higher + 3])
-                    if mean_l >= old_mean_l:
-                        repeat_l = False
-                    if mean_r >= old_mean_r:
-                        repeat_r = False
-                    if mean_l < old_mean_l:
+                    if y[peak-lower-1] < y[peak-lower]:
+                        lower += 1
+                    elif y[peak-lower-2] < y[peak-lower]:
+                        lower += 2
+                    elif y[peak-lower-3] < y[peak-lower]:
                         lower += 3
-                        old_mean_l = mean_l
-                    if mean_r < old_mean_r:
+                    else:
+                        repeat_l = False
+                    if y[peak+higher+1] < y[peak+higher]:
+                        higher += 1
+                    elif y[peak+higher+2] < y[peak+higher]:
+                        higher += 2
+                    elif y[peak+higher+3] < y[peak+higher]:
                         higher += 3
-                        old_mean_r = mean_r
-                        #print(lower)
-                    n = 3  # the larger n is, the smoother curve will be
-                    b = [1.0 / n] * n
-                    a = 1
+                    else:
+                        repeat_r = False
                     x_gauss = x_store[peak - lower:peak + higher]
+                    x_lead = x_store[peak-lower:peak + 3]
                     y_gauss = y[peak - lower:peak + higher]
+                    y_lead = y[peak - lower:peak + 3]
                     #print(len(y_gauss))
-                    if len(y_gauss) > 10 and lower > 8 and higher >8:
+                    if len(y_gauss) > 10 and lower > 4 and higher > 4:
+                        #print(len(y_gauss))
+                        #print(len(x_gauss))
+                        fitting_funcs = [leading_edge, gaussian, split_gaussian, skewed_gaussian]
+                        plotting_funcs = [gauss, gauss, split_gauss, skewed_gauss]
+                        method = 0
+                        force_cont = False
+                        num_sigma = 1
+                        min_num_sigma = False
 
-
-                            print(len(y_gauss))
-                            print(len(x_gauss))
-                            params, cv = scipy.optimize.curve_fit(skewed_gauss, x_gauss, y_gauss, p0, maxfev=1000000)
-                            A, mu, sigma, gamma, b = params
-                            if mu == 0:
-                                continue
-                            squaredDiffs = np.square(y_gauss - skewed_gauss(x_gauss, A, mu, sigma, gamma, b))
-                            squaredDiffsFromMean = np.square(y_gauss - np.mean(y_gauss))
-                            rSquared = 1 - np.sum(squaredDiffs) / np.sum(squaredDiffsFromMean)
-                            #print(rSquared)
-                            print(params)
-                            if rSquared > 0.05:
-                                print(Fore.GREEN)
-                                print(higher)
-                                print(Fore.BLUE)
-                                print(lower)
-                                #print(peak)
-                                old_x = x_gauss
-                                old_y = y_gauss
-                                old_params = params
-                                old_cv = cv
-                            elif rSquared > 0.01:
-                                #print(len(y_gauss))
-                                continue
+                        rtest = 0
+                        params, cv, good = leading_edge(x_lead, y_lead, x[peak], rtest)
+                        if good:
+                            num_sigma = abs(x[peak]-params[1])
+                            min_max = (min(x_lead), max(x_lead), min(y_lead), max(y_lead))
+                            if num_sigma <= 1:
+                                min_num_sigma = [method, num_sigma, params, cv, min_max]
+                                method += 1
                             else:
-                                repeat = False
+                                min_num_sigma = [method, num_sigma, params, cv, min_max]
+                        else:
+                            force_cont = True
+                        method = 1
+                        while num_sigma > 1 or force_cont:
+                            print(method, x[peak])
+                            if method == 4:
                                 break
+                            force_cont = False
+                            params, cv, good = fitting_funcs[method](x_gauss, y_gauss, x[peak], rtest)
+                            if good:
+                                num_sigma = abs(x[peak] - params[1])
+                                print(params[1], np.diag(cv)[1])
+                                print(num_sigma)
+                                print()
+                                min_max = (min(x_gauss), max(x_gauss), min(y_gauss), max(y_gauss))
+                                if num_sigma <= np.sqrt(np.diag(cv))[1]:
+                                    print("a")
+                                    min_num_sigma = [method, num_sigma, params, cv, min_max]
+                                    method += 1
+                                elif not isinstance(min_num_sigma, bool):
+                                    print("b")
+                                    if num_sigma < min_num_sigma[1]:
+                                        min_num_sigma = [method, num_sigma, params, cv, min_max]
+                                        method += 1
+                                    else:
+                                        method += 1
+                                elif isinstance(min_num_sigma, bool) and num_sigma <=3:
+                                    print("c")
+                                    min_num_sigma = [method, num_sigma, params, cv, min_max]
+                                    method += 1
+                                else:
+                                    method += 1
+                            else:
+                                method += 1
+                        if not isinstance(min_num_sigma, bool):
+                            print("here")
+                            if min_num_sigma[1] <=3:
+                                store_min_num_sigma = min_num_sigma
+                                found = True
+                if found:
+                    if store_min_num_sigma[0] <=1:
+                            ax.vlines(store_min_num_sigma[2][1], ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour, label="(" + str(sigfig.round(store_min_num_sigma[2][1],  np.sqrt(np.diag(store_min_num_sigma[3]))[1])) + ") Counts")
+                            x_new = np.linspace(store_min_num_sigma[4][0], store_min_num_sigma[4][1])
+                            func = plotting_funcs[store_min_num_sigma[0]](x_new, store_min_num_sigma[2][0], store_min_num_sigma[2][1], store_min_num_sigma[2][2], store_min_num_sigma[2][3])
+                            plt.plot(x_new, func, color="k")
                         #except:
-                        #    repeat = False
-                        #    #print(old_params, old_cv)
-                        #    fail = True
-                        #    break
-                if not fail and not isinstance(old_cv, bool) and not isinstance(old_params, bool):
-                    x_con = mca_to_kev(old_params[1])
-                    x_conu = x_con * np.sqrt(np.diag(old_cv))[1] / old_params[1]
-                    #print(str(old_x))
-                    x_coni = mca_to_kev(old_x)
-                    x_consig1 = mca_to_kev(abs(old_params[2]))
-                    x_consigu1 = x_consig1 * np.sqrt(np.diag(old_cv))[2] / old_params[2]
-                    params_con = [old_params[0], x_con, x_consig1, old_params[3], old_params[4]]
-                    #print(params_con)
-                    #print(old_params)
-                    errors_con = [np.sqrt(np.diag(old_cv))[0], np.sqrt(np.diag(old_cv))[1], x_conu, x_consigu1]
-                    try:
-                        ax.vlines(x_con, ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour, label="(" + str(sigfig.round(x_con,  x_conu)) + ") KeV")
-                        x_new = np.linspace(min(old_x), max(old_x))
-                        func = skewed_gauss(x_new, params_con[0], params_con[1], params_con[2], params_con[3], params_con[4])
+                        #    print("Fail",store_min_num_sigma[2][1],np.diag(store_min_num_sigma[3][1]))
+                    elif store_min_num_sigma[0] == 2:
+                        try:
+                            ax.vlines(store_min_num_sigma[2][1], ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour,
+                                      label="(" + str(sigfig.round(store_min_num_sigma[2][1],
+                                                                   np.sqrt(np.diag(store_min_num_sigma[3]))[1])) + ") Counts")
+                            x_new = np.linspace(store_min_num_sigma[4][0], store_min_num_sigma[4][1])
+                            func = plotting_funcs[store_min_num_sigma[0]](x_new, store_min_num_sigma[2][0],
+                                                                          store_min_num_sigma[2][1],
+                                                                          store_min_num_sigma[2][2],
+                                                                          store_min_num_sigma[2][3], store_min_num_sigma[2][4], store_min_num_sigma[2][5])
+                            plt.plot(x_new, func, color="k")
+                        except:
+                            print("Fail",store_min_num_sigma[2][1],np.diag(store_min_num_sigma[3][1]))
+
+                    elif store_min_num_sigma[0] == 3:
+                        ax.vlines(store_min_num_sigma[2][1], ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour, label="(" + str(sigfig.round(store_min_num_sigma[2][1],  np.sqrt(np.diag(store_min_num_sigma[3]))[1])) + ") Counts")
+                        x_new = np.linspace(store_min_num_sigma[4][0], store_min_num_sigma[4][1])
+                        func = plotting_funcs[store_min_num_sigma[0]](x_new, store_min_num_sigma[2][0], store_min_num_sigma[2][1], store_min_num_sigma[2][2], store_min_num_sigma[2][3], store_min_num_sigma[2][4])
                         plt.plot(x_new, func, color="k")
-                    except:
-                        print("I fail")
                     #N_peak = gauss_integrate(x_coni, params_con, np.mean([old_y[0], old_y[-1]]), errors_con)
                     #output_intergration.append(N_peak)
                     #efficiency = efficiency_curve(x_con)
@@ -335,6 +369,71 @@ def plot_hub(plot_queue, service, folder_id2,
             lock.release()  # Allow other threads to access the API
 
 
+def leading_edge(x, y, peak, r_check):
+    p0 = (1, peak, 5, 500)
+    params, cv = scipy.optimize.curve_fit(gauss, x, y, p0, maxfev=1000000, bounds=((0,0,0,0),(np.inf, np.inf, np.inf, np.inf)))
+    a, mean, sigma, b = params
+    squaredDiffs = np.square(y - gauss(x, a, mean, sigma, b))
+    squaredDiffsFromMean = np.square(y - np.mean(y))
+    rSquared = 1 - np.sum(squaredDiffs) / np.sum(squaredDiffsFromMean)
+    if rSquared > r_check:
+        return params, cv, True
+    else:
+        return params, cv, False
+
+
+def gaussian(x, y, peak, r_check):
+    p0 = (1, peak, 5, 500)
+    params, cv = scipy.optimize.curve_fit(gauss, x, y, p0, maxfev=1000000, bounds=((0,0,0,0),(np.inf, np.inf, np.inf, np.inf)))
+    a, mean, sigma, b = params
+    squaredDiffs = np.square(y - gauss(x, a, mean, sigma, b))
+    squaredDiffsFromMean = np.square(y - np.mean(y))
+    rSquared = 1 - np.sum(squaredDiffs) / np.sum(squaredDiffsFromMean)
+    if rSquared > r_check:
+        return params, cv, True
+    else:
+        return params, cv, False
+
+
+def split_gaussian(x, y, peak, r_check):
+    p0 = (1, 1, peak, 5, 5, 500)
+    params, cv = scipy.optimize.curve_fit(split_gauss, x, y, p0, maxfev=1000000, bounds=((0,0,0,0,0,0),(np.inf, np.inf, np.inf, np.inf,np.inf,np.inf)))
+    A1, mean, A2, sigma1, sigma2, b= params
+    squaredDiffs = np.square(y - split_gauss(x, A1, mean, A2, sigma1, sigma2, b))
+    squaredDiffsFromMean = np.square(y - np.mean(y))
+    rSquared = 1 - np.sum(squaredDiffs) / np.sum(squaredDiffsFromMean)
+    if rSquared > r_check:
+        return params, cv, True
+    else:
+        return params, cv, False
+
+
+def skewed_gaussian(x, y, peak, r_check):
+    p0 = (1, peak, 5, 1, 500)
+    params, cv = scipy.optimize.curve_fit(skewed_gauss, x, y, p0, maxfev=1000000, bounds=((0,0,0,-np.inf,0),(np.inf, np.inf, np.inf, np.inf, np.inf)))
+    A, mu, sigma, gamma, b = params
+    squaredDiffs = np.square(y - skewed_gauss(x, A, mu, sigma, gamma, b))
+    squaredDiffsFromMean = np.square(y - np.mean(y))
+    rSquared = 1 - np.sum(squaredDiffs) / np.sum(squaredDiffsFromMean)
+    if rSquared > r_check:
+        return params, cv, True
+    else:
+        return params, cv, False
+
+
+def split_skewed_gaussian(x, y, peak, r_check): #not in use, prone to complications
+    p0 = (1, peak, 5, 500)
+    params, cv = scipy.optimize.curve_fit(gauss, x, y, p0, maxfev=1000000, bounds=((0,0,0,0),(np.inf, np.inf, np.inf, np.inf)))
+    a, mean, sigma, b = params
+    squaredDiffs = np.square(y - gauss(x, a, mean, sigma, b))
+    squaredDiffsFromMean = np.square(y - np.mean(y))
+    rSquared = 1 - np.sum(squaredDiffs) / np.sum(squaredDiffsFromMean)
+    if rSquared > r_check:
+        return params, cv, True
+    else:
+        return params, cv, False
+
+
 def gauss(x, a, mean, sigma, b):
     return b + a * np.exp(-(x - mean) ** 2 / (2 * sigma ** 2))
 
@@ -342,7 +441,7 @@ def gauss(x, a, mean, sigma, b):
 def background(x, b, n, c):
     return b * x**n +c
 
-def split_gauss(x, A1, A2, mean, sigma1, sigma2, b1):
+def split_gauss(x, A1, mean, A2, sigma1, sigma2, b1):
     b2 = A1-A2 +b1
     low_x = x[x < mean]
     high_x = x[x >= mean]
