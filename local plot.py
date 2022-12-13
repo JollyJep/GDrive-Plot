@@ -222,8 +222,7 @@ def plot_hub(plot_queue, service, folder_id2,
                         force_cont = False
                         num_sigma = 1
                         min_num_sigma = False
-
-                        rtest = 0
+                        rtest = 0.9
                         params, cv, good = leading_edge(x_lead, y_lead, x[peak], rtest)
                         if good:
                             num_sigma = abs(x[peak]-params[1])
@@ -237,30 +236,23 @@ def plot_hub(plot_queue, service, folder_id2,
                             force_cont = True
                         method = 1
                         while num_sigma > 1 or force_cont:
-                            print(method, x[peak])
                             if method == 4:
                                 break
                             force_cont = False
                             params, cv, good = fitting_funcs[method](x_gauss, y_gauss, x[peak], rtest)
                             if good:
                                 num_sigma = abs(x[peak] - params[1])
-                                print(params[1], np.diag(cv)[1])
-                                print(num_sigma)
-                                print()
                                 min_max = (min(x_gauss), max(x_gauss), min(y_gauss), max(y_gauss))
                                 if num_sigma <= np.sqrt(np.diag(cv))[1]:
-                                    print("a")
                                     min_num_sigma = [method, num_sigma, params, cv, min_max]
                                     method += 1
                                 elif not isinstance(min_num_sigma, bool):
-                                    print("b")
                                     if num_sigma < min_num_sigma[1]:
                                         min_num_sigma = [method, num_sigma, params, cv, min_max]
                                         method += 1
                                     else:
                                         method += 1
                                 elif isinstance(min_num_sigma, bool) and num_sigma <=3:
-                                    print("c")
                                     min_num_sigma = [method, num_sigma, params, cv, min_max]
                                     method += 1
                                 else:
@@ -268,7 +260,6 @@ def plot_hub(plot_queue, service, folder_id2,
                             else:
                                 method += 1
                         if not isinstance(min_num_sigma, bool):
-                            print("here")
                             if min_num_sigma[1] <=3:
                                 store_min_num_sigma = min_num_sigma
                                 found = True
@@ -278,6 +269,7 @@ def plot_hub(plot_queue, service, folder_id2,
                             x_new = np.linspace(store_min_num_sigma[4][0], store_min_num_sigma[4][1])
                             func = plotting_funcs[store_min_num_sigma[0]](x_new, store_min_num_sigma[2][0], store_min_num_sigma[2][1], store_min_num_sigma[2][2], store_min_num_sigma[2][3])
                             plt.plot(x_new, func, color="k")
+                            area = store_min_num_sigma[2][0] * store_min_num_sigma[2][2]/ (np.sqrt(2 * np.pi))
                         #except:
                         #    print("Fail",store_min_num_sigma[2][1],np.diag(store_min_num_sigma[3][1]))
                     elif store_min_num_sigma[0] == 2:
@@ -291,6 +283,7 @@ def plot_hub(plot_queue, service, folder_id2,
                                                                           store_min_num_sigma[2][2],
                                                                           store_min_num_sigma[2][3], store_min_num_sigma[2][4], store_min_num_sigma[2][5])
                             plt.plot(x_new, func, color="k")
+                            area = store_min_num_sigma[2][0] * store_min_num_sigma[2][3] / (np.sqrt(2 * np.pi))*0.5 + store_min_num_sigma[2][2] * store_min_num_sigma[2][4] / (np.sqrt(2 * np.pi))*0.5
                         except:
                             print("Fail",store_min_num_sigma[2][1],np.diag(store_min_num_sigma[3][1]))
 
@@ -299,6 +292,10 @@ def plot_hub(plot_queue, service, folder_id2,
                         x_new = np.linspace(store_min_num_sigma[4][0], store_min_num_sigma[4][1])
                         func = plotting_funcs[store_min_num_sigma[0]](x_new, store_min_num_sigma[2][0], store_min_num_sigma[2][1], store_min_num_sigma[2][2], store_min_num_sigma[2][3], store_min_num_sigma[2][4])
                         plt.plot(x_new, func, color="k")
+                    try:
+                        print(area)
+                    except:
+                        print("skewed")
                     #N_peak = gauss_integrate(x_coni, params_con, np.mean([old_y[0], old_y[-1]]), errors_con)
                     #output_intergration.append(N_peak)
                     #efficiency = efficiency_curve(x_con)
@@ -313,7 +310,7 @@ def plot_hub(plot_queue, service, folder_id2,
                 col += change
                 colour = colorsys.hsv_to_rgb(float(col[0]) / 65536, 1, 1)
 
-
+            output = []
             #output = [name]
             #for value, item in enumerate(output_peak):
             #    output.append("Peak Energy:")
@@ -331,20 +328,18 @@ def plot_hub(plot_queue, service, folder_id2,
             #    for isotope in output_radioiso[value]:
             #        output.append(isotope)
             #    output.append("-----------------------------------------------------------------------------------------\n")
-            #with open(r'./tmp/' + name + "_plotting_variables.txt" , 'w') as fp:
-            #    for item in output:
-            #        # write each item on a new line
-            #        fp.write("%s\n" % item)
+            with open(r'./tmp/' + name + "_plotting_variables.txt" , 'w') as fp:
+                for item in output:
+                    # write each item on a new line
+                    fp.write("%s\n" % item)
 
             plt.ylabel(r"Counts", fontsize=20)
             plt.xlabel("Energy/KeV", fontsize=20)
             plotname = './tmp/' + name + '.png'  # Creating output plot file name
             plt.legend(fontsize=8)
             ax.set_yscale("log")
-            plt.show()
-
-            #plt.savefig(plotname, dpi=300)
-            exit()  # Save plot
+            plt.savefig(plotname, dpi=300)
+            #exit()  # Save plot
             ax.clear()
             excelname = './tmp/' + name + '.xlsx'  # Creating output excel data file name
             master_data.to_excel(excelname)  # Save excel
@@ -370,7 +365,10 @@ def plot_hub(plot_queue, service, folder_id2,
 
 
 def leading_edge(x, y, peak, r_check):
-    p0 = (1, peak, 5, 500)
+    amp = peak - min(y)
+    if amp < 0:
+        amp = 1
+    p0 = (amp, peak, 5, min(y))
     params, cv = scipy.optimize.curve_fit(gauss, x, y, p0, maxfev=1000000, bounds=((0,0,0,0),(np.inf, np.inf, np.inf, np.inf)))
     a, mean, sigma, b = params
     squaredDiffs = np.square(y - gauss(x, a, mean, sigma, b))
@@ -383,7 +381,10 @@ def leading_edge(x, y, peak, r_check):
 
 
 def gaussian(x, y, peak, r_check):
-    p0 = (1, peak, 5, 500)
+    amp = peak-min(y)
+    if amp <0:
+        amp = 1
+    p0 = (amp, peak, 5, min(y))
     params, cv = scipy.optimize.curve_fit(gauss, x, y, p0, maxfev=1000000, bounds=((0,0,0,0),(np.inf, np.inf, np.inf, np.inf)))
     a, mean, sigma, b = params
     squaredDiffs = np.square(y - gauss(x, a, mean, sigma, b))
@@ -396,7 +397,10 @@ def gaussian(x, y, peak, r_check):
 
 
 def split_gaussian(x, y, peak, r_check):
-    p0 = (1, 1, peak, 5, 5, 500)
+    amp = peak - min(y)
+    if amp <0:
+        amp = 1
+    p0 = (amp, 1, peak, 5, 5, min(y))
     params, cv = scipy.optimize.curve_fit(split_gauss, x, y, p0, maxfev=1000000, bounds=((0,0,0,0,0,0),(np.inf, np.inf, np.inf, np.inf,np.inf,np.inf)))
     A1, mean, A2, sigma1, sigma2, b= params
     squaredDiffs = np.square(y - split_gauss(x, A1, mean, A2, sigma1, sigma2, b))
@@ -409,7 +413,10 @@ def split_gaussian(x, y, peak, r_check):
 
 
 def skewed_gaussian(x, y, peak, r_check):
-    p0 = (1, peak, 5, 1, 500)
+    amp = peak - min(y)
+    if amp <0:
+        amp = 1
+    p0 = (amp, peak, 5, 1, min(y))
     params, cv = scipy.optimize.curve_fit(skewed_gauss, x, y, p0, maxfev=1000000, bounds=((0,0,0,-np.inf,0),(np.inf, np.inf, np.inf, np.inf, np.inf)))
     A, mu, sigma, gamma, b = params
     squaredDiffs = np.square(y - skewed_gauss(x, A, mu, sigma, gamma, b))
