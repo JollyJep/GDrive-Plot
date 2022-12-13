@@ -17,8 +17,6 @@ from sympy import oo
 from scipy.signal import lfilter
 from numpy import ma
 from openpyxl import load_workbook
-from colorama import Fore
-from pyampd.ampd import find_peaks, find_peaks_adaptive
 
 
 CLIENT_SECRET_FILE = 'credentials.json'  # file storing API secret and OAuth2 data
@@ -116,11 +114,6 @@ def plot_hub(plot_queue, service, folder_id2,
     for label in (ax.get_xticklabels() + ax.get_yticklabels()):
         label.set_fontsize(16)
     while keep_going:  # Will repeat until keyboard interrupt, will gracefully exit (Now redundant)
-        output_intergration = []
-        output_efficiency = []
-        output_radioiso = []
-        output_peak = []
-        output_fwhm = []
         id, name = plot_queue.get()  # Retrieve data from Google Drive Thread
         if name[-4:] == ".TKA":  # Prevents wrong files being plotted
             lock.acquire()  # Only one thread can do API requests
@@ -150,13 +143,13 @@ def plot_hub(plot_queue, service, folder_id2,
                 x.append(value + 1)
             x = np.array(x)
             x_store = x
-            #x = mca_to_kev(x)
+            x = mca_to_kev(x)
             ax.plot(x, y, '--', marker='+')
             peaks, _ = scipy.signal.find_peaks(y, height=100, prominence= 100)
             colour = (1, 0, 0)
             col = np.array([0, 65536, 65536], dtype=np.uint16)
             change = np.array([65536 / len(peaks), 0, 0], dtype=np.uint8)
-            print(len(peaks))
+            output_info = [name, "-----------------------------------------------------------------------------------------\n"]
             for peak in peaks:
                 #ax.vlines(peak, ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour,
                 #          label=peak)
@@ -270,13 +263,14 @@ def plot_hub(plot_queue, service, folder_id2,
                             func = plotting_funcs[store_min_num_sigma[0]](x_new, store_min_num_sigma[2][0], store_min_num_sigma[2][1], store_min_num_sigma[2][2], store_min_num_sigma[2][3])
                             plt.plot(x_new, func, color="k")
                             area = store_min_num_sigma[2][0] * store_min_num_sigma[2][2]/ (np.sqrt(2 * np.pi))
+                            uncertainty_area = np.sqrt((np.sqrt(np.diag(store_min_num_sigma[3]))[0]/store_min_num_sigma[2][0])**2 + (np.sqrt(np.diag(store_min_num_sigma[3]))[2]/store_min_num_sigma[2][2])**2) * area
                         #except:
                         #    print("Fail",store_min_num_sigma[2][1],np.diag(store_min_num_sigma[3][1]))
                     elif store_min_num_sigma[0] == 2:
                         try:
                             ax.vlines(store_min_num_sigma[2][1], ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour,
                                       label="(" + str(sigfig.round(store_min_num_sigma[2][1],
-                                                                   np.sqrt(np.diag(store_min_num_sigma[3]))[1])) + ") Counts")
+                                                                   np.sqrt(np.diag(store_min_num_sigma[3]))[1])) + ") KeV")
                             x_new = np.linspace(store_min_num_sigma[4][0], store_min_num_sigma[4][1])
                             func = plotting_funcs[store_min_num_sigma[0]](x_new, store_min_num_sigma[2][0],
                                                                           store_min_num_sigma[2][1],
@@ -284,50 +278,33 @@ def plot_hub(plot_queue, service, folder_id2,
                                                                           store_min_num_sigma[2][3], store_min_num_sigma[2][4], store_min_num_sigma[2][5])
                             plt.plot(x_new, func, color="k")
                             area = store_min_num_sigma[2][0] * store_min_num_sigma[2][3] / (np.sqrt(2 * np.pi))*0.5 + store_min_num_sigma[2][2] * store_min_num_sigma[2][4] / (np.sqrt(2 * np.pi))*0.5
+                            uncertainty_area = np.sqrt(
+                                (np.sqrt(np.diag(store_min_num_sigma[3]))[0] / store_min_num_sigma[2][0]) ** 2 + (
+                                            np.sqrt(np.diag(store_min_num_sigma[3]))[2] / store_min_num_sigma[2][
+                                        2]) ** 2+ (
+                                            np.sqrt(np.diag(store_min_num_sigma[3]))[2] / store_min_num_sigma[3][
+                                        2]) ** 2+ (
+                                            np.sqrt(np.diag(store_min_num_sigma[3]))[2] / store_min_num_sigma[4][
+                                        2]) ** 2) * area
                         except:
                             print("Fail",store_min_num_sigma[2][1],np.diag(store_min_num_sigma[3][1]))
 
                     elif store_min_num_sigma[0] == 3:
-                        ax.vlines(store_min_num_sigma[2][1], ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour, label="(" + str(sigfig.round(store_min_num_sigma[2][1],  np.sqrt(np.diag(store_min_num_sigma[3]))[1])) + ") Counts")
+                        ax.vlines(store_min_num_sigma[2][1], ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour, label="(" + str(sigfig.round(store_min_num_sigma[2][1],  np.sqrt(np.diag(store_min_num_sigma[3]))[1])) + ") KeV")
                         x_new = np.linspace(store_min_num_sigma[4][0], store_min_num_sigma[4][1])
                         func = plotting_funcs[store_min_num_sigma[0]](x_new, store_min_num_sigma[2][0], store_min_num_sigma[2][1], store_min_num_sigma[2][2], store_min_num_sigma[2][3], store_min_num_sigma[2][4])
                         plt.plot(x_new, func, color="k")
                     try:
-                        print(area)
+                        output_info.append(["Energy", "(" + str(sigfig.round(store_min_num_sigma[2][1],  np.sqrt(np.diag(store_min_num_sigma[3]))[1])) +") KeV", "All variables" , store_min_num_sigma[2], "All uncertainties", np.sqrt(np.diag(store_min_num_sigma[3])), "Area", sigfig.round(area, uncertainty_area), "-----------------------------------------------------------------------------------------\n"])
                     except:
                         print("skewed")
-                    #N_peak = gauss_integrate(x_coni, params_con, np.mean([old_y[0], old_y[-1]]), errors_con)
-                    #output_intergration.append(N_peak)
-                    #efficiency = efficiency_curve(x_con)
-                    #output_peak.append([x_con, x_conu])
-                    #output_efficiency.append(efficiency)
-                    #output_fwhm.append([x_consig * 2 * np.sqrt(2 * np.log(2)), x_consigu * 2 * np.sqrt(2 * np.log(2))])
-                    #radioiso = isotope_detector(x_con, x_conu)
-                    #output_radioiso.append(radioiso)
-                    #plt.text(old_params[1], max(y) * 0.9,
-                             #"" + str(sigfig.round(old_params[1], np.sqrt(np.diag(cv))[1])) + "", color=colour,
-                             #rotation=90)
                 col += change
                 colour = colorsys.hsv_to_rgb(float(col[0]) / 65536, 1, 1)
-
             output = []
-            #output = [name]
-            #for value, item in enumerate(output_peak):
-            #    output.append("Peak Energy:")
-            #    output.append("(" + str(sigfig.round(output_peak[value][0],  output_peak[value][1])) + ") KeV")
-            #    output.append("FWHM:")
-            #    output.append("(" + str(sigfig.round(output_fwhm[value][0],  output_fwhm[value][1])) + ") KeV")
-            #    output.append("Area of photopeak:")
-            #    try:
-            #        output.append(str(sigfig.round(output_intergration[value][0],  output_intergration[value][1])))
-            #    except:
-            #        output.append("Error")
-            #    output.append("Efficiency")
-            #    output.append(str(output_efficiency[value]))
-            #    output.append("Potential radioisotopes:")
-            #    for isotope in output_radioiso[value]:
-            #        output.append(isotope)
-            #    output.append("-----------------------------------------------------------------------------------------\n")
+            for value, item in enumerate(output_info):
+                for string in item:
+                    output.append(string)
+
             with open(r'./tmp/' + name + "_plotting_variables.txt" , 'w') as fp:
                 for item in output:
                     # write each item on a new line
@@ -476,7 +453,7 @@ def skewed_gauss(x, A, mu, sigma,  gamma, b):
 
 
 def mca_to_kev(x):
-    return 0.276 * x + 0.5 # Replace with found values
+    return 0.277 * x -0.6# Replace with found values
 
 
 def efficiency_curve(x):
