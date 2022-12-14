@@ -142,7 +142,6 @@ def plot_hub(plot_queue, service, folder_id2,
             for value, _ in enumerate(y):
                 x.append(value + 1)
             x = np.array(x)
-            x_store = x
             x = mca_to_kev(x)
             ax.plot(x, y, '--', marker='+')
             peaks, _ = scipy.signal.find_peaks(y, height=100, prominence= 100)
@@ -153,19 +152,12 @@ def plot_hub(plot_queue, service, folder_id2,
             for peak in peaks:
                 #ax.vlines(peak, ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour,
                 #          label=peak)
-
                 lower = 0
                 higher = 0
                 repeat = True
                 repeat_l = True
                 repeat_r = True
-                fail = False
                 index = 0
-                p0 = (1, x_store[peak], 2, 0.1, y[peak]/2)
-                old_cv = False
-                old_params = False
-                old_mean_l = 0.0
-                old_mean_r = 0.0
                 if peak == 0 or len(y) -5 < peak:
                     repeat = False
                     fail = True
@@ -187,9 +179,9 @@ def plot_hub(plot_queue, service, folder_id2,
                         break
                     if y[peak-lower-1] < y[peak-lower]:
                         lower += 1
-                    elif y[peak-lower-2] < y[peak-lower]:
+                    elif y[peak-lower-2] < y[peak-lower] and len(y_gauss) < 10:
                         lower += 2
-                    elif y[peak-lower-3] < y[peak-lower]:
+                    elif y[peak-lower-3] < y[peak-lower] and len(y_gauss) < 10:
                         lower += 3
                     else:
                         repeat_l = False
@@ -201,23 +193,24 @@ def plot_hub(plot_queue, service, folder_id2,
                         higher += 3
                     else:
                         repeat_r = False
-                    x_gauss = x_store[peak - lower:peak + higher]
-                    x_lead = x_store[peak-lower:peak + 3]
+                    x_gauss = x[peak - lower:peak + higher]
+                    x_lead = x[peak-lower:peak + 3]
                     y_gauss = y[peak - lower:peak + higher]
                     y_lead = y[peak - lower:peak + 3]
-                    #print(len(y_gauss))
+
                     if len(y_gauss) > 10 and lower > 4 and higher > 4:
-                        #print(len(y_gauss))
-                        #print(len(x_gauss))
+
                         fitting_funcs = [leading_edge, gaussian, split_gaussian, skewed_gaussian]
                         plotting_funcs = [gauss, gauss, split_gauss, skewed_gauss]
                         method = 0
                         force_cont = False
-                        num_sigma = 1
+                        num_sigma = 10
                         min_num_sigma = False
                         rtest = 0.9
                         params, cv, good = leading_edge(x_lead, y_lead, x[peak], rtest)
+
                         if good:
+
                             num_sigma = abs(x[peak]-params[1])
                             min_max = (min(x_lead), max(x_lead), min(y_lead), max(y_lead))
                             if num_sigma <= 1:
@@ -229,10 +222,11 @@ def plot_hub(plot_queue, service, folder_id2,
                             force_cont = True
                         method = 1
                         while num_sigma > 1 or force_cont:
-                            if method == 4:
+                            if method == 3:
                                 break
                             force_cont = False
                             params, cv, good = fitting_funcs[method](x_gauss, y_gauss, x[peak], rtest)
+
                             if good:
                                 num_sigma = abs(x[peak] - params[1])
                                 min_max = (min(x_gauss), max(x_gauss), min(y_gauss), max(y_gauss))
@@ -252,13 +246,14 @@ def plot_hub(plot_queue, service, folder_id2,
                                     method += 1
                             else:
                                 method += 1
+
                         if not isinstance(min_num_sigma, bool):
                             if min_num_sigma[1] <=3:
                                 store_min_num_sigma = min_num_sigma
                                 found = True
                 if found:
                     if store_min_num_sigma[0] <=1:
-                            ax.vlines(store_min_num_sigma[2][1], ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour, label="(" + str(sigfig.round(store_min_num_sigma[2][1],  np.sqrt(np.diag(store_min_num_sigma[3]))[1])) + ") Counts")
+                            ax.vlines(store_min_num_sigma[2][1], ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour, label="(" + str(sigfig.round(store_min_num_sigma[2][1],  np.sqrt(np.diag(store_min_num_sigma[3]))[1])) + ") KeV")
                             x_new = np.linspace(store_min_num_sigma[4][0], store_min_num_sigma[4][1])
                             func = plotting_funcs[store_min_num_sigma[0]](x_new, store_min_num_sigma[2][0], store_min_num_sigma[2][1], store_min_num_sigma[2][2], store_min_num_sigma[2][3])
                             plt.plot(x_new, func, color="k")
@@ -316,6 +311,7 @@ def plot_hub(plot_queue, service, folder_id2,
             plt.legend(fontsize=8)
             ax.set_yscale("log")
             plt.savefig(plotname, dpi=300)
+            #plt.show()
             #exit()  # Save plot
             ax.clear()
             excelname = './tmp/' + name + '.xlsx'  # Creating output excel data file name
@@ -367,6 +363,7 @@ def gaussian(x, y, peak, r_check):
     squaredDiffs = np.square(y - gauss(x, a, mean, sigma, b))
     squaredDiffsFromMean = np.square(y - np.mean(y))
     rSquared = 1 - np.sum(squaredDiffs) / np.sum(squaredDiffsFromMean)
+
     if rSquared > r_check:
         return params, cv, True
     else:
@@ -442,7 +439,6 @@ def split_skewed_gauss(x, A1, A2, mu, sigma, b1, gamma):
     low_gauss = b1 * low_x +A1/denom * np.exp((-(low_x-mu)**2)/(2 * sigma ** 2)) * (1 + erf((gamma * (low_x-mu))/(sigma * np.sqrt(2)
     )))
     high_gauss = b2 * high_x + A2 / denom * np.exp((-(high_x - mu) ** 2) / (2 * sigma ** 2)) * (1 + erf((gamma * (high_x - mu)) / (sigma * np.sqrt(2))))
-    #print(np.concatenate((low_gauss, high_gauss)))
     return np.concatenate((low_gauss, high_gauss))
 
 
