@@ -169,6 +169,7 @@ def plot_hub(plot_queue, service, folder_id2,
                         repeat = False
                         fail = True
                 found = False
+                y_gauss = []
                 while repeat:
 
                     if len(y[peak - index - 3: peak-index]) < 3 or len(y[peak + index: peak + index + 3]) < 3 or len(y[peak - index - 6: peak-index -3]) < 3 or len(y[peak + index + 3: peak + index + 6]) < 3:
@@ -197,7 +198,6 @@ def plot_hub(plot_queue, service, folder_id2,
                     x_lead = x[peak-lower:peak + 3]
                     y_gauss = y[peak - lower:peak + higher]
                     y_lead = y[peak - lower:peak + 3]
-
                     if len(y_gauss) > 10 and lower > 4 and higher > 4:
 
                         fitting_funcs = [leading_edge, gaussian, split_gaussian, skewed_gaussian]
@@ -210,7 +210,6 @@ def plot_hub(plot_queue, service, folder_id2,
                         params, cv, good = leading_edge(x_lead, y_lead, x[peak], rtest)
 
                         if good:
-
                             num_sigma = abs(x[peak]-params[1])
                             min_max = (min(x_lead), max(x_lead), min(y_lead), max(y_lead))
                             if num_sigma <= 1:
@@ -222,11 +221,10 @@ def plot_hub(plot_queue, service, folder_id2,
                             force_cont = True
                         method = 1
                         while num_sigma > 1 or force_cont:
-                            if method == 3:
+                            if method == 4:
                                 break
                             force_cont = False
                             params, cv, good = fitting_funcs[method](x_gauss, y_gauss, x[peak], rtest)
-
                             if good:
                                 num_sigma = abs(x[peak] - params[1])
                                 min_max = (min(x_gauss), max(x_gauss), min(y_gauss), max(y_gauss))
@@ -457,8 +455,6 @@ def efficiency_curve(x):
 
 
 def gauss_integrate(x, params, height, errors):
-    #print(max(x) - min(x))
-    #print(height)
     local_x = sympy.symbols('x')
     a, mean, sigma = params
     local_gauss = a * sympy.exp(-(local_x - mean) ** 2 / (2 * sigma ** 2))
