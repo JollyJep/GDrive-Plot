@@ -14,6 +14,9 @@ import colorsys
 import sigfig
 import sympy
 from sympy import oo
+from sympy import erf as symerf
+from sympy import exp as syexp
+from sympy import pi, root
 from scipy.signal import lfilter
 from numpy import ma
 from openpyxl import load_workbook
@@ -121,6 +124,7 @@ def plot_hub(plot_queue, service, folder_id2,
             fh = io.BytesIO()  # Prepping local computer to take downloads
             downloader = MediaIoBaseDownload(fh, request)  # Creates download environment
             name = name[:-4]
+            print("Working on " + name)
             done = False
             while not done:  # Download the data
                 status, done = downloader.next_chunk()
@@ -145,9 +149,9 @@ def plot_hub(plot_queue, service, folder_id2,
             x = mca_to_kev(x)
             ax.plot(x, y, '--', marker='+')
             peaks, _ = scipy.signal.find_peaks(y, height=100, prominence= 100)
-            colour = (1, 0, 0)
-            col = np.array([0, 65536, 65536], dtype=np.uint16)
-            change = np.array([65536 / len(peaks), 0, 0], dtype=np.uint8)
+            #colour = (1, 0, 0)
+            #col = np.array([0, 65536, 65536], dtype=np.uint16)
+            #change = np.array([65536 / len(peaks), 0, 0], dtype=np.uint8)
             output_info = [name, "-----------------------------------------------------------------------------------------\n"]
             for peak in peaks:
                 #ax.vlines(peak, ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour,
@@ -158,7 +162,7 @@ def plot_hub(plot_queue, service, folder_id2,
                 repeat_l = True
                 repeat_r = True
                 index = 0
-                if peak == 0 or len(y) -5 < peak:
+                if peak < 20 or len(y) -5 < peak:
                     repeat = False
                     fail = True
                 else:
@@ -199,16 +203,15 @@ def plot_hub(plot_queue, service, folder_id2,
                     y_gauss = y[peak - lower:peak + higher]
                     y_lead = y[peak - lower:peak + 3]
                     if len(y_gauss) > 10 and lower > 4 and higher > 4:
-
-                        fitting_funcs = [leading_edge, gaussian, split_gaussian, skewed_gaussian]
-                        plotting_funcs = [gauss, gauss, split_gauss, skewed_gauss]
+                        colour = colour_picker(x[peak])
+                        fitting_funcs = [leading_edge, gaussian, leading_edge_emergency, gaussian_emergency,split_gaussian, skewed_gaussian]
+                        plotting_funcs = [gauss, gauss, gauss, gauss, split_gauss, skewed_gauss]
                         method = 0
                         force_cont = False
                         num_sigma = 10
                         min_num_sigma = False
                         rtest = 0.9
                         params, cv, good = leading_edge(x_lead, y_lead, x[peak], rtest)
-
                         if good:
                             num_sigma = abs(x[peak]-params[1])
                             min_max = (min(x_lead), max(x_lead), min(y_lead), max(y_lead))
@@ -221,7 +224,7 @@ def plot_hub(plot_queue, service, folder_id2,
                             force_cont = True
                         method = 1
                         while num_sigma > 1 or force_cont:
-                            if method == 4:
+                            if method == 5:
                                 break
                             force_cont = False
                             params, cv, good = fitting_funcs[method](x_gauss, y_gauss, x[peak], rtest)
@@ -245,21 +248,22 @@ def plot_hub(plot_queue, service, folder_id2,
                             else:
                                 method += 1
 
+
                         if not isinstance(min_num_sigma, bool):
                             if min_num_sigma[1] <=3:
                                 store_min_num_sigma = min_num_sigma
                                 found = True
                 if found:
-                    if store_min_num_sigma[0] <=1:
+                    if store_min_num_sigma[0] <=3:
                             ax.vlines(store_min_num_sigma[2][1], ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour, label="(" + str(sigfig.round(store_min_num_sigma[2][1],  np.sqrt(np.diag(store_min_num_sigma[3]))[1])) + ") KeV")
                             x_new = np.linspace(store_min_num_sigma[4][0], store_min_num_sigma[4][1])
                             func = plotting_funcs[store_min_num_sigma[0]](x_new, store_min_num_sigma[2][0], store_min_num_sigma[2][1], store_min_num_sigma[2][2], store_min_num_sigma[2][3])
                             plt.plot(x_new, func, color="k")
                             area = store_min_num_sigma[2][0] * store_min_num_sigma[2][2]/ (np.sqrt(2 * np.pi))
-                            uncertainty_area = np.sqrt((np.sqrt(np.diag(store_min_num_sigma[3]))[0]/store_min_num_sigma[2][0])**2 + (np.sqrt(np.diag(store_min_num_sigma[3]))[2]/store_min_num_sigma[2][2])**2) * area
+                            uncertainty_area = np.sqrt((np.sqrt(np.diag(store_min_num_sigma[3]))[2]/store_min_num_sigma[2][2])**2) * area
                         #except:
                         #    print("Fail",store_min_num_sigma[2][1],np.diag(store_min_num_sigma[3][1]))
-                    elif store_min_num_sigma[0] == 2:
+                    elif store_min_num_sigma[0] == 4:
                         try:
                             ax.vlines(store_min_num_sigma[2][1], ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour,
                                       label="(" + str(sigfig.round(store_min_num_sigma[2][1],
@@ -272,7 +276,7 @@ def plot_hub(plot_queue, service, folder_id2,
                             plt.plot(x_new, func, color="k")
                             area = store_min_num_sigma[2][0] * store_min_num_sigma[2][3] / (np.sqrt(2 * np.pi))*0.5 + store_min_num_sigma[2][2] * store_min_num_sigma[2][4] / (np.sqrt(2 * np.pi))*0.5
                             uncertainty_area = np.sqrt(
-                                (np.sqrt(np.diag(store_min_num_sigma[3]))[0] / store_min_num_sigma[2][0]) ** 2 + (
+                                (
                                             np.sqrt(np.diag(store_min_num_sigma[3]))[2] / store_min_num_sigma[2][
                                         2]) ** 2+ (
                                             np.sqrt(np.diag(store_min_num_sigma[3]))[2] / store_min_num_sigma[3][
@@ -282,21 +286,47 @@ def plot_hub(plot_queue, service, folder_id2,
                         except:
                             print("Fail",store_min_num_sigma[2][1],np.diag(store_min_num_sigma[3][1]))
 
-                    elif store_min_num_sigma[0] == 3:
-                        ax.vlines(store_min_num_sigma[2][1], ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour, label="(" + str(sigfig.round(store_min_num_sigma[2][1],  np.sqrt(np.diag(store_min_num_sigma[3]))[1])) + ") KeV")
+                    elif store_min_num_sigma[0] == 5:
+                        gamma = store_min_num_sigma[2][3]
+                        delta = np.sign(gamma) * np.sqrt(0.5 * (((2 * gamma) / (4 - np.pi)) ** (2 / 3)) / (
+                                1 + ((2 * gamma) / (4 - np.pi)) ** (2 / 3)))
+                        alpha = delta / np.sqrt(1 - delta ** 2)
+                        mu = np.sqrt(2 / np.pi) * delta
+                        sigma = np.sqrt(1 - mu ** 2)
+                        mode = mu - gamma * sigma / 2 - np.sign(alpha) / 2 * np.exp(-2 * np.pi / abs(alpha))
+                        ax.vlines(mode, ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour, label="(" + str(
+                            sigfig.round(mode, np.sqrt(np.diag(store_min_num_sigma[3]))[3] / gamma * mode)) + ") KeV")
                         x_new = np.linspace(store_min_num_sigma[4][0], store_min_num_sigma[4][1])
-                        func = plotting_funcs[store_min_num_sigma[0]](x_new, store_min_num_sigma[2][0], store_min_num_sigma[2][1], store_min_num_sigma[2][2], store_min_num_sigma[2][3], store_min_num_sigma[2][4])
+                        func = plotting_funcs[store_min_num_sigma[0]](x_new, store_min_num_sigma[2][0],
+                                                                      store_min_num_sigma[2][1],
+                                                                      store_min_num_sigma[2][2],
+                                                                      store_min_num_sigma[2][3],
+                                                                      store_min_num_sigma[2][4])
                         plt.plot(x_new, func, color="k")
-                    try:
+                        print(mode)
+                        print(mu)
+                        #A, mu, sigma, gamma, b = store_min_num_sigma[2]
+                        #denom = root(pi , 2) * sigma
+                        #x_area = sympy.symbols('a')
+                        #area_expr = b + A / denom * syexp((-(x_area - mu) ** 2) / (2 * sigma ** 2)) * (
+                        #            1 + symerf((gamma * (x_area - mu)) / (sigma * root(2,2))))
+                        #area = float(sympy.integrate(area_expr, (x_area, -oo, oo)))
+                        #uncertainty_area = area * np.sqrt((np.sqrt(np.diag(store_min_num_sigma[3]))[0]/A)**2 + (np.sqrt(np.diag(store_min_num_sigma[3]))[1]/A)**2 + (np.sqrt(np.diag(store_min_num_sigma[3]))[2]/A)**2 + (np.sqrt(np.diag(store_min_num_sigma[3]))[3]/A)**2 + (np.sqrt(np.diag(store_min_num_sigma[3]))[4]/A)**2)
+
+                    if store_min_num_sigma[0] < 5:
                         output_info.append(["Energy", "(" + str(sigfig.round(store_min_num_sigma[2][1],  np.sqrt(np.diag(store_min_num_sigma[3]))[1])) +") KeV", "All variables" , store_min_num_sigma[2], "All uncertainties", np.sqrt(np.diag(store_min_num_sigma[3])), "Area", sigfig.round(area, uncertainty_area), "-----------------------------------------------------------------------------------------\n"])
-                    except:
-                        print("skewed")
-                col += change
-                colour = colorsys.hsv_to_rgb(float(col[0]) / 65536, 1, 1)
+                    else:
+                        output_info.append(["Energy", "(" + str(sigfig.round(mode,np.sqrt(np.diag(store_min_num_sigma[3]))[3] / gamma * mode))[1] + ") KeV", "All variables",store_min_num_sigma[2], "All uncertainties",np.sqrt(np.diag(store_min_num_sigma[3])), "Area",sigfig.round(area, uncertainty_area),"-----------------------------------------------------------------------------------------\n"])
+
+                #col += change
+                #colour = colorsys.hsv_to_rgb(float(col[0]) / 65536, 1, 1)
             output = []
             for value, item in enumerate(output_info):
-                for string in item:
-                    output.append(string)
+                if value < 2:
+                    output.append(item)
+                else:
+                    for string in item:
+                        output.append(string)
 
             with open(r'./tmp/' + name + "_plotting_variables.txt" , 'w') as fp:
                 for item in output:
@@ -335,12 +365,18 @@ def plot_hub(plot_queue, service, folder_id2,
             lock.release()  # Allow other threads to access the API
 
 
+def colour_picker(x):
+    hue = 11703/500 * x
+    return colorsys.hsv_to_rgb(hue/65536,1,1)
+
+
+
 def leading_edge(x, y, peak, r_check):
-    amp = peak - min(y)
+    amp = peak - 1.1*min(y)
     if amp < 0:
         amp = 1
     p0 = (amp, peak, 5, min(y))
-    params, cv = scipy.optimize.curve_fit(gauss, x, y, p0, maxfev=1000000, bounds=((0,0,0,0),(np.inf, np.inf, np.inf, np.inf)))
+    params, cv = scipy.optimize.curve_fit(gauss, x, y, p0, maxfev=10000000, bounds=((0,0,0,0),(np.inf, np.inf, np.inf, np.inf)))
     a, mean, sigma, b = params
     squaredDiffs = np.square(y - gauss(x, a, mean, sigma, b))
     squaredDiffsFromMean = np.square(y - np.mean(y))
@@ -351,12 +387,46 @@ def leading_edge(x, y, peak, r_check):
         return params, cv, False
 
 
+def leading_edge_emergency(x, y, peak, r_check):
+    amp = peak - 1.1*min(y)
+    if amp < 0:
+        amp = 1
+    p0 = (amp, peak, 5, min(y))
+    params, cv = scipy.optimize.curve_fit(gauss, x, y, p0, maxfev=10000000, bounds=((0,0,0,min(y)*0.5),(np.inf, np.inf, np.inf, min(y)*1.8)))
+    a, mean, sigma, b = params
+    squaredDiffs = np.square(y - gauss(x, a, mean, sigma, b))
+    squaredDiffsFromMean = np.square(y - np.mean(y))
+    rSquared = 1 - np.sum(squaredDiffs) / np.sum(squaredDiffsFromMean)
+    if rSquared > r_check:
+        return params, cv, True
+    else:
+        return params, cv, False
+
+
+
 def gaussian(x, y, peak, r_check):
-    amp = peak-min(y)
+    amp = peak-1.1*min(y)
     if amp <0:
         amp = 1
     p0 = (amp, peak, 5, min(y))
-    params, cv = scipy.optimize.curve_fit(gauss, x, y, p0, maxfev=1000000, bounds=((0,0,0,0),(np.inf, np.inf, np.inf, np.inf)))
+    params, cv = scipy.optimize.curve_fit(gauss, x, y, p0, maxfev=10000000, bounds=((0,0,0,0),(np.inf, np.inf, np.inf, np.inf)))
+    a, mean, sigma, b = params
+    squaredDiffs = np.square(y - gauss(x, a, mean, sigma, b))
+    squaredDiffsFromMean = np.square(y - np.mean(y))
+    rSquared = 1 - np.sum(squaredDiffs) / np.sum(squaredDiffsFromMean)
+
+    if rSquared > r_check:
+        return params, cv, True
+    else:
+        return params, cv, False
+
+
+def gaussian_emergency(x, y, peak, r_check):
+    amp = peak-1.1*min(y)
+    if amp <0:
+        amp = 1
+    p0 = (amp, peak, 5, min(y))
+    params, cv = scipy.optimize.curve_fit(gauss, x, y, p0, maxfev=10000000, bounds=((0,0,0,min(y)*0.5),(np.inf, np.inf, np.inf, min(y)*1.8)))
     a, mean, sigma, b = params
     squaredDiffs = np.square(y - gauss(x, a, mean, sigma, b))
     squaredDiffsFromMean = np.square(y - np.mean(y))
@@ -369,11 +439,11 @@ def gaussian(x, y, peak, r_check):
 
 
 def split_gaussian(x, y, peak, r_check):
-    amp = peak - min(y)
+    amp = peak - 1.1*min(y)
     if amp <0:
         amp = 1
     p0 = (amp, 1, peak, 5, 5, min(y))
-    params, cv = scipy.optimize.curve_fit(split_gauss, x, y, p0, maxfev=1000000, bounds=((0,0,0,0,0,0),(np.inf, np.inf, np.inf, np.inf,np.inf,np.inf)))
+    params, cv = scipy.optimize.curve_fit(split_gauss, x, y, p0, maxfev=10000000, bounds=((0,0,0,0,0,0),(np.inf, np.inf, np.inf, np.inf,np.inf,np.inf)))
     A1, mean, A2, sigma1, sigma2, b= params
     squaredDiffs = np.square(y - split_gauss(x, A1, mean, A2, sigma1, sigma2, b))
     squaredDiffsFromMean = np.square(y - np.mean(y))
@@ -385,11 +455,11 @@ def split_gaussian(x, y, peak, r_check):
 
 
 def skewed_gaussian(x, y, peak, r_check):
-    amp = peak - min(y)
+    amp = peak - 1.1*min(y)
     if amp <0:
         amp = 1
     p0 = (amp, peak, 5, 1, min(y))
-    params, cv = scipy.optimize.curve_fit(skewed_gauss, x, y, p0, maxfev=1000000, bounds=((0,0,0,-np.inf,0),(np.inf, np.inf, np.inf, np.inf, np.inf)))
+    params, cv = scipy.optimize.curve_fit(skewed_gauss, x, y, p0, maxfev=10000000, bounds=((0,0,0,-np.inf,0),(np.inf, np.inf, np.inf, np.inf, np.inf)))
     A, mu, sigma, gamma, b = params
     squaredDiffs = np.square(y - skewed_gauss(x, A, mu, sigma, gamma, b))
     squaredDiffsFromMean = np.square(y - np.mean(y))
@@ -402,7 +472,7 @@ def skewed_gaussian(x, y, peak, r_check):
 
 def split_skewed_gaussian(x, y, peak, r_check): #not in use, prone to complications
     p0 = (1, peak, 5, 500)
-    params, cv = scipy.optimize.curve_fit(gauss, x, y, p0, maxfev=1000000, bounds=((0,0,0,0),(np.inf, np.inf, np.inf, np.inf)))
+    params, cv = scipy.optimize.curve_fit(gauss, x, y, p0, maxfev=10000000, bounds=((0,0,0,0),(np.inf, np.inf, np.inf, np.inf)))
     a, mean, sigma, b = params
     squaredDiffs = np.square(y - gauss(x, a, mean, sigma, b))
     squaredDiffsFromMean = np.square(y - np.mean(y))
