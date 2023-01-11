@@ -124,7 +124,9 @@ def plot_hub(plot_queue, service, folder_id2,
             fh = io.BytesIO()  # Prepping local computer to take downloads
             downloader = MediaIoBaseDownload(fh, request)  # Creates download environment
             name = name[:-4]
-            print("Working on " + name)
+            now = datetime.now()
+            start_time = now.strftime("%A, %d, %m, %Y\n%H:%M:%S")
+            print("Working on " + name + "\n" + start_time)
             done = False
             while not done:  # Download the data
                 status, done = downloader.next_chunk()
@@ -137,10 +139,6 @@ def plot_hub(plot_queue, service, folder_id2,
             master_data = pd.read_csv('./tmp/local_data.csv')  # Create internal spreadsheet of data
             y = master_data.dropna().reset_index(drop=True)
             y = y.values.ravel()
-            times = y[:2]
-            n = 15  # the larger n is, the smoother curve will be
-            b = [1.0 / n] * n
-            a = 1
             y = y[2:]
             x = []
             for value, _ in enumerate(y):
@@ -148,14 +146,10 @@ def plot_hub(plot_queue, service, folder_id2,
             x = np.array(x)
             x = mca_to_kev(x)
             ax.plot(x, y, '--', marker='+')
-            peaks, _ = scipy.signal.find_peaks(y, height=100, prominence= 100)
-            #colour = (1, 0, 0)
-            #col = np.array([0, 65536, 65536], dtype=np.uint16)
-            #change = np.array([65536 / len(peaks), 0, 0], dtype=np.uint8)
+            Num_Peaks = 0
+            peaks, _ = scipy.signal.find_peaks(y, height=100, prominence= 10)
             output_info = [name, "-----------------------------------------------------------------------------------------\n"]
             for peak in peaks:
-                #ax.vlines(peak, ymin=min(y) * 0.95, ymax=max(y) * 1.05, color=colour,
-                #          label=peak)
                 lower = 0
                 higher = 0
                 repeat = True
@@ -303,8 +297,6 @@ def plot_hub(plot_queue, service, folder_id2,
                                                                       store_min_num_sigma[2][3],
                                                                       store_min_num_sigma[2][4])
                         plt.plot(x_new, func, color="k")
-                        print(mode)
-                        print(mu)
                         #A, mu, sigma, gamma, b = store_min_num_sigma[2]
                         #denom = root(pi , 2) * sigma
                         #x_area = sympy.symbols('a')
@@ -317,7 +309,7 @@ def plot_hub(plot_queue, service, folder_id2,
                         output_info.append(["Energy", "(" + str(sigfig.round(store_min_num_sigma[2][1],  np.sqrt(np.diag(store_min_num_sigma[3]))[1])) +") KeV", "All variables" , store_min_num_sigma[2], "All uncertainties", np.sqrt(np.diag(store_min_num_sigma[3])), "Area", sigfig.round(area, uncertainty_area), "-----------------------------------------------------------------------------------------\n"])
                     else:
                         output_info.append(["Energy", "(" + str(sigfig.round(mode,np.sqrt(np.diag(store_min_num_sigma[3]))[3] / gamma * mode))[1] + ") KeV", "All variables",store_min_num_sigma[2], "All uncertainties",np.sqrt(np.diag(store_min_num_sigma[3])), "Area",sigfig.round(area, uncertainty_area),"-----------------------------------------------------------------------------------------\n"])
-
+                    Num_Peaks += 1
                 #col += change
                 #colour = colorsys.hsv_to_rgb(float(col[0]) / 65536, 1, 1)
             output = []
@@ -336,9 +328,10 @@ def plot_hub(plot_queue, service, folder_id2,
             plt.ylabel(r"Counts", fontsize=20)
             plt.xlabel("Energy/KeV", fontsize=20)
             plotname = './tmp/' + name + '.png'  # Creating output plot file name
-            plt.legend(fontsize=8)
+            size = -0.35 * Num_Peaks +24
+            plt.legend(fontsize=size)
             ax.set_yscale("log")
-            plt.savefig(plotname, dpi=300)
+            plt.savefig(plotname, dpi=600)
             #plt.show()
             #exit()  # Save plot
             ax.clear()
@@ -392,7 +385,7 @@ def leading_edge_emergency(x, y, peak, r_check):
     if amp < 0:
         amp = 1
     p0 = (amp, peak, 5, min(y))
-    params, cv = scipy.optimize.curve_fit(gauss, x, y, p0, maxfev=10000000, bounds=((0,0,0,min(y)*0.5),(np.inf, np.inf, np.inf, min(y)*1.8)))
+    params, cv = scipy.optimize.curve_fit(gauss, x, y, p0, maxfev=10000000, bounds=((0,0,0,min(y)*0.9),(np.inf, np.inf, np.inf, min(y)*1.2)))
     a, mean, sigma, b = params
     squaredDiffs = np.square(y - gauss(x, a, mean, sigma, b))
     squaredDiffsFromMean = np.square(y - np.mean(y))
@@ -426,7 +419,7 @@ def gaussian_emergency(x, y, peak, r_check):
     if amp <0:
         amp = 1
     p0 = (amp, peak, 5, min(y))
-    params, cv = scipy.optimize.curve_fit(gauss, x, y, p0, maxfev=10000000, bounds=((0,0,0,min(y)*0.5),(np.inf, np.inf, np.inf, min(y)*1.8)))
+    params, cv = scipy.optimize.curve_fit(gauss, x, y, p0, maxfev=10000000, bounds=((0,0,0,min(y)*0.9),(np.inf, np.inf, np.inf, min(y)*1.2)))
     a, mean, sigma, b = params
     squaredDiffs = np.square(y - gauss(x, a, mean, sigma, b))
     squaredDiffsFromMean = np.square(y - np.mean(y))
