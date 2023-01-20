@@ -306,9 +306,11 @@ def plot_hub(plot_queue, service, folder_id2,
                         #uncertainty_area = area * np.sqrt((np.sqrt(np.diag(store_min_num_sigma[3]))[0]/A)**2 + (np.sqrt(np.diag(store_min_num_sigma[3]))[1]/A)**2 + (np.sqrt(np.diag(store_min_num_sigma[3]))[2]/A)**2 + (np.sqrt(np.diag(store_min_num_sigma[3]))[3]/A)**2 + (np.sqrt(np.diag(store_min_num_sigma[3]))[4]/A)**2)
 
                     if store_min_num_sigma[0] < 5:
-                        output_info.append(["Energy", "(" + str(sigfig.round(store_min_num_sigma[2][1],  np.sqrt(np.diag(store_min_num_sigma[3]))[1])) +") KeV", "All variables" , store_min_num_sigma[2], "All uncertainties", np.sqrt(np.diag(store_min_num_sigma[3])), "Area", sigfig.round(area, uncertainty_area), "-----------------------------------------------------------------------------------------\n"])
+                        efficiency, u_efficiency = radioactivity(store_min_num_sigma[2][1],  np.sqrt(np.diag(store_min_num_sigma[3]))[1])
+                        output_info.append(["Energy", "(" + str(sigfig.round(store_min_num_sigma[2][1],  np.sqrt(np.diag(store_min_num_sigma[3]))[1])) +") KeV", "All variables" , store_min_num_sigma[2], "All uncertainties", np.sqrt(np.diag(store_min_num_sigma[3])), "Area", sigfig.round(area, uncertainty_area), "Efficiency", "(" + str(sigfig.round(efficiency, u_efficiency)) + ")",  "-----------------------------------------------------------------------------------------\n"])
                     else:
-                        output_info.append(["Energy", "(" + str(sigfig.round(mode,np.sqrt(np.diag(store_min_num_sigma[3]))[3] / gamma * mode))[1] + ") KeV", "All variables",store_min_num_sigma[2], "All uncertainties",np.sqrt(np.diag(store_min_num_sigma[3])), "Area",sigfig.round(area, uncertainty_area),"-----------------------------------------------------------------------------------------\n"])
+                        efficiency, u_efficiency = radioactivity(mode, (mode,np.sqrt(np.diag(store_min_num_sigma[3]))[3] / gamma * mode))
+                        output_info.append(["Energy", "(" + str(sigfig.round(mode,np.sqrt(np.diag(store_min_num_sigma[3]))[3] / gamma * mode))[1] + ") KeV", "All variables",store_min_num_sigma[2], "All uncertainties",np.sqrt(np.diag(store_min_num_sigma[3])), "Area",sigfig.round(area, uncertainty_area), "Efficiency", "(" + str(sigfig.round(efficiency, u_efficiency)) + ")" ,"-----------------------------------------------------------------------------------------\n"])
                     Num_Peaks += 1
                 #col += change
                 #colour = colorsys.hsv_to_rgb(float(col[0]) / 65536, 1, 1)
@@ -328,7 +330,7 @@ def plot_hub(plot_queue, service, folder_id2,
             plt.ylabel(r"Counts", fontsize=20)
             plt.xlabel("Energy/KeV", fontsize=20)
             plotname = './tmp/' + name + '.png'  # Creating output plot file name
-            size = -0.35 * Num_Peaks +24
+            size = -0.37 * Num_Peaks +24
             plt.legend(fontsize=size)
             ax.set_yscale("log")
             plt.savefig(plotname, dpi=600)
@@ -513,8 +515,10 @@ def mca_to_kev(x):
     return 0.277 * x -0.6# Replace with found values
 
 
-def efficiency_curve(x):
-    return (2 * 8.66 / 100) / ((x / 103) ** 1.1 + (103 / x) ** 3.6)
+def efficiency_curve(x, x_error):
+    efficiency = (2 * 8.66 / 100) / ((x / 103) ** 1.1 + (103 / x) ** 3.6)
+    error = x_error/x * efficiency
+    return efficiency, error
 
 
 def gauss_integrate(x, params, height, errors):
@@ -526,10 +530,10 @@ def gauss_integrate(x, params, height, errors):
     return (area, area * np.sqrt((errors[0] / a) ** 2 + (errors[1] / mean) ** 2 + (errors[2] / sigma) ** 2))
 
 
-#def radioactivity(N_peak, times, energy, uncertainty):
-#    efficiency = efficiency_curve(energy)
-#    #isotope_detector(energy, uncertainty)
-#    return
+def radioactivity( energy, uncertainty):
+    efficiency = efficiency_curve(energy, uncertainty)
+    #isotope_detector(energy, uncertainty)
+    return efficiency
 
 
 def isotope_detector(energy, uncertainty):
